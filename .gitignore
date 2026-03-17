@@ -1,0 +1,28 @@
+# Dependencias
+node_modules/
+
+# Logs y bases de datos locales
+logs
+*.log
+npm-debug.log*
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Compilación (si usas TypeScript)
+dist/
+build/
+
+# Variables de entorno y credenciales (CRÍTICO)
+.env
+.env.test
+.env.production
+config/credentials.json
+
+# Editor
+.vscode/
+.idea/
+
+# MacOS
+.DS_Store
