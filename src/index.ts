@@ -6,7 +6,7 @@ import { exploreCatalog, getInventory, addToInventory } from './controllers/vend
 import { getDashboardStats } from './controllers/dashboard.controller';
 import cors from 'cors';
 import { getMe } from './controllers/auth.controller';
-
+import { registrarUsuario, registrarJoyaMaestra } from './controllers/admin.controller';
 // ...
 const app = express();
 app.use(cors()); // Esto permite que cualquier origen (como tu Vite) se conecte
@@ -16,8 +16,9 @@ app.use(express.json());
 // Rutas Públicas
 app.post('/auth/login', login);
 
-// Rutas Admin (Aquí luego agregaremos tu endpoint de crear catálogo)
-app.use('/admin', verifyToken, isAdmin);
+// Rutas Admin (Protegidas por verifyToken y además por isAdmin)
+app.post('/admin/users', verifyToken, isAdmin, registrarUsuario);
+app.post('/admin/catalogo', verifyToken, isAdmin, registrarJoyaMaestra);
 
 // Rutas Vendedor
 app.use('/vendor', verifyToken); // El middleware protege todo lo que empiece con /vendor

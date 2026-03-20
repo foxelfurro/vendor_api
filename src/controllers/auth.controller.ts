@@ -44,8 +44,18 @@ export const getMe = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.user_id;
 
   try {
-    // Traemos los datos frescos de la base de datos
-    const query = 'SELECT id, nombre, email, marca_id FROM usuarios WHERE id = $1';
+    // Consulta actualizada: Ahora traemos el rol_id de la tabla usuario_roles
+    const query = `
+      SELECT 
+        u.id, 
+        u.nombre, 
+        u.email, 
+        u.marca_id,
+        ur.rol_id AS rol
+      FROM usuarios u
+      LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
+      WHERE u.id = $1
+    `;
     const { rows } = await pool.query(query, [userId]);
 
     if (rows.length === 0) {
