@@ -1,58 +1,73 @@
 import { Request, Response } from 'express';
+// Asegúrate de importar tu conexión a la base de datos (ajusta la ruta según tu proyecto)
 import { pool } from '../config/db';
 
-export const registrarUsuario = async (req: Request, res: Response) => {
-  const { nombre, email, password, rol } = req.body;
+export const createUser = async (req: Request, res: Response): Promise<any> => {
+    const { nombre, email, password, rol_id } = req.body;
+    
+    // 1. Validación básica de datos entrantes
+    if (!nombre || !email || !password || !rol_id) {
+        return res.status(400).json({ message: "Todos los campos (nombre, email, password, rol_id) son obligatorios" });
+    }
+    
+    const marca_id = rol_id === 1 ? null : rol_id - 1; // Si es admin (rol_id=1), marca_id es null, sino es rol_id - 1
+    
+    try {
+        const query = `
+            WITH nuevo_usuario AS (
+                INSERT INTO usuarios (id, nombre, email, password_hash, marca_id) 
+                VALUES (gen_random_uuid(), $1, $2, crypt($3, gen_salt('bf', 10)), $4)
+                RETURNING id
+            )
+            INSERT INTO usuario_roles (usuario_id, rol_id)
+            SELECT id, $5::int FROM nuevo_usuario
+            RETURNING usuario_id;
+        `;
+        
+        const values = [nombre, email, password, marca_id, rol_id];
+        const result = await pool.query(query, values);
 
-  try {
-    // 1. Iniciamos una transacción para asegurar que ambos inserts funcionen juntos
-    await pool.query('BEGIN');
+        // 3. Capturamos el ID generado para devolverlo en la respuesta (opcional pero muy útil)
+        const nuevoUsuarioId = result.rows[0]?.usuario_id;
 
-    // 2. Insertar el nuevo usuario en la tabla 'usuarios'
-    // Usamos pgcrypto para encriptar la contraseña igual que en el login
-    const insertUserQuery = `
-      INSERT INTO usuarios (nombre, email, password_hash) 
-      VALUES ($1, $2, crypt($3, gen_salt('bf'))) 
-      RETURNING id
-    `;
-    const userResult = await pool.query(insertUserQuery, [nombre, email, password]);
-    const newUserId = userResult.rows[0].id;
+        return res.status(201).json({ 
+            message: "Personal registrado correctamente con su rol",
+            usuario_id: nuevoUsuarioId
+        });
 
-    // 3. Asignar el rol al nuevo usuario en 'usuario_roles'
-    const insertRoleQuery = `
-      INSERT INTO usuario_roles (usuario_id, rol_id) 
-      VALUES ($1, $2)
-    `;
-    // Si el frontend envía 'admin', le asignamos 1, sino 2 (vendedor)
-    const rolId = rol === 'admin' ? 1 : 2; 
-    await pool.query(insertRoleQuery, [newUserId, rolId]);
-
-    // Confirmamos la transacción
-    await pool.query('COMMIT');
-    res.status(201).json({ message: 'Usuario creado exitosamente', id: newUserId });
-  } catch (error) {
-    // Si algo falla, deshacemos todo
-    await pool.query('ROLLBACK');
-    console.error("Error al registrar usuario:", error);
-    res.status(500).json({ error: 'Error interno al crear el usuario' });
-  }
+    } catch (error: any) {
+        console.error("Error al crear usuario:", error);
+        
+        // Manejo de correos duplicados (Unique Violation)
+        if (error.code === '23505') {
+            return res.status(400).json({ message: "Este correo ya está registrado" });
+        }
+        
+        return res.status(500).json({ message: "Error interno al guardar en la base de datos" });
+    }
 };
 
-export const registrarJoyaMaestra = async (req: Request, res: Response) => {
-  const { nombre, codigo, precio_base, descripcion } = req.body;
+export const createCatalogItem = async (req: Request, res: Response) => {
+    // Usamos los nombres exactos de tu SQL
+    const { sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id } = req.body;
 
-  try {
-    // Ajusta 'catalogo_maestro' si el nombre de tu tabla es diferente
-    const query = `
-      INSERT INTO catalogo_maestro (codigo, nombre, descripcion, precio_base) 
-      VALUES ($1, $2, $3, $4) 
-      RETURNING *
-    `;
-    const { rows } = await pool.query(query, [codigo, nombre, descripcion, precio_base]);
-    
-    res.status(201).json({ message: 'Joya registrada', joya: rows[0] });
-  } catch (error) {
-    console.error("Error al registrar joya:", error);
-    res.status(500).json({ error: 'Error al registrar la joya en el catálogo' });
-  }
+    try {
+        const query = `
+            INSERT INTO catalogo_maestro 
+            (sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING *;
+        `;
+        
+        const values = [sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id];
+        const result = await pool.query(query, values);
+
+        res.status(201).json({ 
+            message: "Joya agregada exitosamente al catálogo maestro",
+            joya: result.rows[0] 
+        });
+    } catch (error) {
+        console.error("Error al insertar joya:", error);
+        res.status(500).json({ message: "Error al guardar en la base de datos" });
+    }
 };
