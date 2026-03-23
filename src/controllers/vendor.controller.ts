@@ -88,3 +88,32 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// PUT /vendor/inventory/:id
+// Actualiza la cantidad de stock de un producto existente en el inventario
+export const updateInventoryStock = async (req: AuthRequest, res: Response) => {
+  const vendorId = req.user?.user_id;
+  const { id } = req.params; // Este será el inventario_id
+  const { stock } = req.body;
+
+  try {
+    const query = `
+      UPDATE inventario_vendedor
+      SET stock = $1
+      WHERE id = $2 AND vendedor_id = $3
+      RETURNING *;
+    `;
+    const { rows } = await pool.query(query, [stock, id, vendorId]);
+    
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Producto no encontrado en tu inventario.' });
+    }
+
+    res.json({
+      message: 'Stock actualizado exitosamente.',
+      producto: rows[0]
+    });
+  } catch (error) {
+    console.error("🔥 ERROR AL ACTUALIZAR STOCK:", error);
+    res.status(500).json({ error: 'Error al actualizar el stock del producto.' });
+  }
+};

@@ -3,7 +3,7 @@ import cors from 'cors';
 import { verifyToken, isAdmin } from './middlewares/auth.middleware';
 import { login, getMe } from './controllers/auth.controller';
 import { getSalesHistory, registerSale } from './controllers/sales.controller';
-import { exploreCatalog, getInventory, addToInventory } from './controllers/vendor.controller';
+import { exploreCatalog, getInventory, addToInventory, updateInventoryStock } from './controllers/vendor.controller';
 import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem } from './controllers/admin.controller';
 
@@ -22,6 +22,7 @@ app.post('/admin/catalogo', verifyToken, isAdmin, createCatalogItem);
 app.get('/vendor/explore', verifyToken, exploreCatalog);
 app.get('/vendor/inventory', verifyToken, getInventory);
 app.post('/vendor/inventory', verifyToken, addToInventory);
+app.put('/vendor/inventory/:id', verifyToken, updateInventoryStock);
 app.get('/vendor/dashboard-stats', verifyToken, getDashboardStats);
 
 app.post('/sales/register', verifyToken, registerSale);
