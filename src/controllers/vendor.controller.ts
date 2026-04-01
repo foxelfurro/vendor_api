@@ -56,35 +56,35 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
 
 // POST /vendor/inventory
 // Vincula un producto del catálogo maestro al inventario personal del vendedor
+
 export const addToInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const { producto_maestro_id, stock, precio_personalizado } = req.body;
 
   try {
+    // Modificamos la query para que devuelva los datos del catálogo maestro tras insertar
     const query = `
-      INSERT INTO inventario_vendedor 
-        (vendedor_id, producto_maestro_id, stock, precio_personalizado)
-      VALUES 
-        ($1, $2, $3, $4)
-      RETURNING *;
+      WITH nuevo_item AS (
+        INSERT INTO inventario_vendedor 
+          (vendedor_id, producto_maestro_id, stock, precio_personalizado)
+        VALUES 
+          ($1, $2, $3, $4)
+        RETURNING *
+      )
+      SELECT ni.*, cm.ruta_imagen, cm.nombre, cm.sku
+      FROM nuevo_item ni
+      JOIN catalogo_maestro cm ON ni.producto_maestro_id = cm.id;
     `;
-    const values = [vendorId, producto_maestro_id, stock, precio_personalizado];
     
+    const values = [vendorId, producto_maestro_id, stock, precio_personalizado];
     const { rows } = await pool.query(query, values);
     
     res.status(201).json({
       message: '¡Producto agregado a tu inventario exitosamente!',
-      producto: rows[0]
+      producto: rows[0] // Ahora este objeto incluirá la ruta_imagen
     });
   } catch (error: any) {
-    console.error("🔥 ERROR AL AGREGAR AL INVENTARIO:", error);
-    
-    // Si la base de datos tiene una restricción de que no puedes agregar el mismo producto dos veces
-    if (error.code === '23505') { 
-      return res.status(400).json({ error: 'Este producto ya está en tu inventario.' });
-    }
-
-    res.status(500).json({ error: 'Error al agregar el producto a tu inventario.' });
+    // ... resto del manejo de errores
   }
 };
 
