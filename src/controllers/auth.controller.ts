@@ -17,12 +17,15 @@ export const login = async (req: Request, res: Response) => {
 
   try {
     const query = `
-      SELECT u.id, u.marca_id, u.password_hash, ur.rol_id AS rol
-      FROM usuarios u
-      LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
-      WHERE u.email = $1
-    `;
-    const { rows } = await pool.query(query, [email]);
+          SELECT 
+            u.id, 
+            u.marca_id, 
+            ur.rol_id AS rol
+          FROM usuarios u
+          LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
+          WHERE u.email = $1 AND u.password_hash = crypt($2, u.password_hash) AND u.activo = true
+        `;
+    const { rows } = await pool.query(query, [email, password]);
 
     if (rows.length === 0) {
       return res.status(401).json({ error: 'Usuario no encontrado' });

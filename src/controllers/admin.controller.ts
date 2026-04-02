@@ -71,3 +71,28 @@ export const createCatalogItem = async (req: Request, res: Response) => {
         res.status(500).json({ message: "Error al guardar en la base de datos" });
     }
 };
+
+export const deleteUser = async (req: Request, res: Response): Promise<any> => {
+    const { id } = req.params;
+    
+    try {
+        const query = `
+            UPDATE usuarios 
+            SET activo = false 
+            WHERE id = $1 
+            RETURNING id;
+        `;
+        
+        const result = await pool.query(query, [id]);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "El usuario no existe" });
+        }
+
+        return res.status(200).json({ message: "Usuario desactivado correctamente. Sus ventas y estadísticas se conservan." });
+
+    } catch (error: any) {
+        console.error("Error al desactivar usuario:", error);
+        return res.status(500).json({ message: "Error interno al actualizar la base de datos" });
+    }
+};
