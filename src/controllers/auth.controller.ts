@@ -17,14 +17,11 @@ export const login = async (req: Request, res: Response) => {
 
   try {
     const query = `
-          SELECT 
-            u.id, 
-            u.marca_id, 
-            ur.rol_id AS rol
-          FROM usuarios u
-          LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
-          WHERE u.email = $1 AND u.activo = true
-        `;
+      SELECT u.id, u.marca_id, u.password_hash, ur.rol_id AS rol
+      FROM usuarios u
+      LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
+      WHERE u.email = $1 AND u.activo = true
+    `;
     const { rows } = await pool.query(query, [email]);
 
     if (rows.length === 0) {
