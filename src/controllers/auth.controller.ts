@@ -168,14 +168,17 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     await pool.query(updateQuery, [resetToken, user.id]);
 
     // 👇 CONFIGURACIÓN PARA TU DOMINIO PRIVADO DE QLATTE 👇
-    const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST, // Ej: mail.qlatte.com
-      port: Number(process.env.EMAIL_PORT) || 465,
-      secure: true, 
+const transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST,
+      port: Number(process.env.EMAIL_PORT),
+      secure: false, // 👈 CAMBIA ESTO A FALSE (requerido para el puerto 587)
       auth: {
-        user: process.env.EMAIL_USER, // soporte@qlatte.com
-        pass: process.env.EMAIL_PASS, // tu contraseña real
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
       },
+      tls: {
+        rejectUnauthorized: false // 👈 AGREGA ESTO para evitar bloqueos de certificados en hosting
+      }
     });
 
     // OJO: Cambia este 'localhost:5173' por tu URL de Vercel cuando lo subas a producción
