@@ -9,7 +9,7 @@ import bcrypt from 'bcrypt';
 const conekta = require('conekta');
 
 // Configuramos la llave usando la variable de entorno que ya limpiamos (sin comillas)
-conekta.api_key = process.env.CONEKTA_PRIVATE_KEY || 'key_rFXLUER5xR1aVEXss68TE0o';
+conekta.api_key = process.env.CONEKTA_PRIVATE_KEY;
 conekta.locale = 'es';
 
 export const login = async (req: Request, res: Response) => {
