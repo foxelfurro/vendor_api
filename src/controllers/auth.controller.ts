@@ -158,15 +158,14 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
 
     const user = rows[0];
     const resetToken = crypto.randomBytes(20).toString('hex');
-    const resetExpires = new Date();
-    resetExpires.setHours(resetExpires.getHours() + 1); // Expira en 1 hora
 
+    // Le decimos a Postgres que sume 1 hora basándose en su propio reloj
     const updateQuery = `
       UPDATE usuarios 
-      SET reset_password_token = $1, reset_password_expires = $2 
-      WHERE id = $3
+      SET reset_password_token = $1, reset_password_expires = NOW() + INTERVAL '1 hour' 
+      WHERE id = $2
     `;
-    await pool.query(updateQuery, [resetToken, resetExpires, user.id]);
+    await pool.query(updateQuery, [resetToken, user.id]);
 
     // 👇 CONFIGURACIÓN PARA TU DOMINIO PRIVADO DE QLATTE 👇
     const transporter = nodemailer.createTransport({
