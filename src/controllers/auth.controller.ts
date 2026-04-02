@@ -23,9 +23,9 @@ export const login = async (req: Request, res: Response) => {
             ur.rol_id AS rol
           FROM usuarios u
           LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
-          WHERE u.email = $1 AND u.password_hash = crypt($2, u.password_hash) AND u.activo = true
+          WHERE u.email = $1 AND u.activo = true
         `;
-    const { rows } = await pool.query(query, [email, password]);
+    const { rows } = await pool.query(query, [email]);
 
     if (rows.length === 0) {
       return res.status(401).json({ error: 'Usuario no encontrado' });
