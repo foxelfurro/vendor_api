@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { verifyToken, isAdmin } from './middlewares/auth.middleware';
 // 1. Importamos la nueva función de suscripción
-import { login, getMe, subscribeAndCreateAccount } from './controllers/auth.controller';
+import { login, getMe, subscribeAndCreateAccount, forgotPassword, resetPassword} from './controllers/auth.controller';
 import { getSalesHistory, registerSale } from './controllers/sales.controller';
 import { exploreCatalog, getInventory, addToInventory, updateInventoryStock } from './controllers/vendor.controller';
 import { getDashboardStats } from './controllers/dashboard.controller';
@@ -14,6 +14,8 @@ app.use(express.json());
 
 // --- RUTAS PÚBLICAS (No requieren token) ---
 app.post('/auth/login', login);
+app.post('/auth/forgot-password', forgotPassword);
+app.post('/auth/reset-password', resetPassword);
 // Esta es la ruta que usará el Checkout para crear nuevos vendedores
 app.post('/auth/subscribe', subscribeAndCreateAccount); 
 

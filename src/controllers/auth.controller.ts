@@ -3,6 +3,8 @@ import { pool } from '../config/db';
 import jwt from 'jsonwebtoken';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import bcrypt from 'bcrypt'; 
+import crypto from 'crypto';
+import nodemailer from 'nodemailer';
 
 
 // 1. IMPORTACIÓN CORREGIDA: Usamos require directamente sobre una constante en minúsculas
@@ -139,5 +141,106 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
     res.status(400).json({ success: false, error: msg });
   } finally {
     client.release();
+  }
+};
+
+// --- 1. ENVIAR CORREO DE RECUPERACIÓN ---
+export const forgotPassword = async (req: Request, res: Response): Promise<any> => {
+  const { email } = req.body;
+
+  try {
+    const queryUser = 'SELECT id, email FROM usuarios WHERE email = $1';
+    const { rows } = await pool.query(queryUser, [email]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'No existe una cuenta con este correo.' });
+    }
+
+    const user = rows[0];
+    const resetToken = crypto.randomBytes(20).toString('hex');
+    const resetExpires = new Date();
+    resetExpires.setHours(resetExpires.getHours() + 1); // Expira en 1 hora
+
+    const updateQuery = `
+      UPDATE usuarios 
+      SET reset_password_token = $1, reset_password_expires = $2 
+      WHERE id = $3
+    `;
+    await pool.query(updateQuery, [resetToken, resetExpires, user.id]);
+
+    // 👇 CONFIGURACIÓN PARA TU DOMINIO PRIVADO DE QLATTE 👇
+    const transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST, // Ej: mail.qlatte.com
+      port: Number(process.env.EMAIL_PORT) || 465,
+      secure: true, 
+      auth: {
+        user: process.env.EMAIL_USER, // soporte@qlatte.com
+        pass: process.env.EMAIL_PASS, // tu contraseña real
+      },
+    });
+
+    // OJO: Cambia este 'localhost:5173' por tu URL de Vercel cuando lo subas a producción
+    const resetUrl = `http://localhost:5173/reset-password?token=${resetToken}`;
+
+    const mailOptions = {
+      from: `"Qlatte | Lumin" <${process.env.EMAIL_USER}>`,
+      to: user.email,
+      subject: 'Recuperación de Contraseña - Qlatte Lumin',
+      html: `
+        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color: #333;">Recuperación de Acceso</h2>
+          <p>Hola, solicitaste restablecer tu contraseña para Qlatte | Lumin.</p>
+          <p>Haz clic en el siguiente botón para crear una nueva contraseña. Este enlace es válido por 1 hora.</p>
+          <a href="${resetUrl}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-top: 15px; font-weight: bold;">Restablecer mi contraseña</a>
+          <p style="margin-top: 30px; font-size: 12px; color: #666;">Si tú no solicitaste esto, puedes ignorar este correo de forma segura.</p>
+        </div>
+      `
+    };
+
+    await transporter.sendMail(mailOptions);
+    return res.status(200).json({ message: 'Correo de recuperación enviado con éxito.' });
+
+  } catch (error) {
+    console.error('Error en forgotPassword:', error);
+    return res.status(500).json({ error: 'Error al procesar la solicitud.' });
+  }
+};
+
+
+// --- 2. RESTABLECER LA CONTRASEÑA ---
+export const resetPassword = async (req: Request, res: Response): Promise<any> => {
+  const { token, newPassword } = req.body;
+
+  try {
+    const query = `
+      SELECT id 
+      FROM usuarios 
+      WHERE reset_password_token = $1 AND reset_password_expires > NOW()
+    `;
+    const { rows } = await pool.query(query, [token]);
+
+    if (rows.length === 0) {
+      return res.status(400).json({ error: 'El código es inválido o ha expirado. Vuelve a solicitar la recuperación.' });
+    }
+
+    const userId = rows[0].id;
+
+    // Encriptamos la nueva contraseña
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+
+    // Actualizamos la base de datos y "quemamos" el token para que no se use dos veces
+    const updateQuery = `
+      UPDATE usuarios 
+      SET password_hash = $1, reset_password_token = NULL, reset_password_expires = NULL 
+      WHERE id = $2
+    `;
+    await pool.query(updateQuery, [hashedPassword, userId]);
+
+    return res.status(200).json({ message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.' });
+
+  } catch (error) {
+    console.error('Error en resetPassword:', error);
+    return res.status(500).json({ error: 'Error al actualizar la contraseña.' });
   }
 };
