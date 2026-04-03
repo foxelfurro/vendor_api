@@ -169,7 +169,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     const transporter = nodemailer.createTransport({
       host: process.env.EMAIL_HOST, // Asegúrate de que esto sea mail.privateemail.com
       port: Number(process.env.EMAIL_PORT), // 587
-      secure: true, // TLS
+      secure: false, // TLS
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
