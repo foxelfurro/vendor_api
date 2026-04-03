@@ -4,7 +4,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 
 // 1. Importamos y configuramos Conekta
 const Conekta = require('conekta');
-Conekta.api_key = process.env.CONEKTA_PRIVATE_KEY || 'key_rFXLUER5xR1aVEXss68TE0o'; // Pon tu llave privada aquí
+Conekta.api_key = process.env.CONEKTA_PRIVATE_KEY 
 Conekta.locale = 'es';
 
 // --- VENTA TRADICIONAL (Local / Efectivo) ---
