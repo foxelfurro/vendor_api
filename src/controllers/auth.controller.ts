@@ -158,8 +158,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
 
     const user = rows[0];
     const resetToken = crypto.randomBytes(20).toString('hex');
-
-    // Le decimos a Postgres que sume 1 hora basándose en su propio reloj
+    
     const updateQuery = `
       UPDATE usuarios 
       SET reset_password_token = $1, reset_password_expires = NOW() + INTERVAL '1 hour' 
@@ -167,22 +166,22 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     `;
     await pool.query(updateQuery, [resetToken, user.id]);
 
-    // 👇 CONFIGURACIÓN PARA TU DOMINIO PRIVADO DE QLATTE 👇
-const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: Number(process.env.EMAIL_PORT),
-      secure: false, // 👈 CAMBIA ESTO A FALSE (requerido para el puerto 587)
+    const transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST, // Asegúrate de que esto sea mail.privateemail.com
+      port: Number(process.env.EMAIL_PORT), // 587
+      secure: true, // TLS
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
       tls: {
-        rejectUnauthorized: false // 👈 AGREGA ESTO para evitar bloqueos de certificados en hosting
-      }
+        rejectUnauthorized: false
+      },
+      connectionTimeout: 10000, 
+      greetingTimeout: 10000,
     });
 
-    // OJO: Cambia este 'localhost:5173' por tu URL de Vercel cuando lo subas a producción
-    const resetUrl = `http://localhost:5173/reset-password?token=${resetToken}`;
+    const resetUrl = `https://vendor-client-prod.vercel.app/reset-password?token=${resetToken}`;
 
     const mailOptions = {
       from: `"Qlatte | Lumin" <${process.env.EMAIL_USER}>`,
@@ -214,6 +213,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<any> =
   const { token, newPassword } = req.body;
 
   try {
+    // Buscamos a un usuario que tenga ese token y que el token no haya expirado
     const query = `
       SELECT id 
       FROM usuarios 
@@ -231,7 +231,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<any> =
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
-    // Actualizamos la base de datos y "quemamos" el token para que no se use dos veces
+    // Actualizamos la contraseña y limpiamos el token para que no se pueda volver a usar
     const updateQuery = `
       UPDATE usuarios 
       SET password_hash = $1, reset_password_token = NULL, reset_password_expires = NULL 
