@@ -167,8 +167,8 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     await pool.query(updateQuery, [resetToken, user.id]);
 
     const transporter = nodemailer.createTransport({
-      host: "mail.privateemail.com",
-      port: 587,
+      host: process.env.EMAIL_HOST,
+      port: Number(process.env.EMAIL_PORT),
       secure: false, // TLS
       auth: {
         user: process.env.EMAIL_USER,
