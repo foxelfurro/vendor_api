@@ -167,18 +167,21 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     await pool.query(updateQuery, [resetToken, user.id]);
 
     const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST, // Asegúrate de que esto sea mail.privateemail.com
-      port: Number(process.env.EMAIL_PORT), // 587
+      host: "mail.privateemail.com",
+      port: 587,
       secure: false, // TLS
       auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
       },
       tls: {
-        rejectUnauthorized: false
+        rejectUnauthorized: false,
+        minVersion: 'TLSv1.2'
       },
-      connectionTimeout: 10000, 
-      greetingTimeout: 10000,
+      // Aumentamos los tiempos al máximo para que Render no tire la toalla
+      connectionTimeout: 20000, // 20 segundos para conectar
+      greetingTimeout: 20000,   // 20 segundos para el saludo SMTP
+      socketTimeout: 30000,     // 30 segundos de espera total
     });
 
     const resetUrl = `https://vendor-client-prod.vercel.app/reset-password?token=${resetToken}`;
@@ -199,12 +202,18 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     };
 
     await transporter.sendMail(mailOptions);
-    return res.status(200).json({ message: 'Correo de recuperación enviado con éxito.' });
+      
+      // Si llega aquí, todo salió bien
+      return res.status(200).json({ message: "Correo enviado con éxito." });
 
-  } catch (error) {
-    console.error('Error en forgotPassword:', error);
-    return res.status(500).json({ error: 'Error al procesar la solicitud.' });
-  }
+    } catch (error) {
+      console.error("Error detallado:", error);
+      
+      // SI FALLA EL CORREO, RESPONDEMOS UN 200 O 400, PERO NO DEJAMOS EL 500
+      return res.status(400).json({ 
+        message: "No pudimos enviar el correo en este momento, pero tu solicitud fue procesada. Inténtalo de nuevo en un minuto." 
+      });
+    }
 };
 
 
