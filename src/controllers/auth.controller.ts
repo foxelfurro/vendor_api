@@ -14,12 +14,13 @@ const conekta = require('conekta');
 conekta.api_key = process.env.CONEKTA_PRIVATE_KEY;
 conekta.locale = 'es';
 
-export const login = async (req: Request, res: Response) => {
+export const login = async (req: Request, res: Response): Promise<any> => {
   const { email, password } = req.body;
 
   try {
+    // 1. AQUÍ ESTÁ EL CAMBIO DEL SELECT (Agregamos u.suscripcion_fin)
     const query = `
-      SELECT u.id, u.marca_id, u.password_hash, ur.rol_id AS rol
+      SELECT u.id, u.marca_id, u.password_hash, u.suscripcion_fin, ur.rol_id AS rol
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
       WHERE u.email = $1 AND u.activo = true
@@ -31,22 +32,37 @@ export const login = async (req: Request, res: Response) => {
     }
 
     const user = rows[0];
+
+    // 2. 🚨 EL CADENERO 🚨 (Esto no lo tenías en el código que me mandaste)
+    if (user.suscripcion_fin) {
+      const ahora = new Date();
+      const fechaFin = new Date(user.suscripcion_fin);
+
+      if (fechaFin < ahora) {
+        return res.status(403).json({ 
+          error: 'Tu suscripción ha expirado. Por favor, renueva tu plan para acceder.' 
+        });
+      }
+    }
+
+    // 3. Verificamos contraseña
     const validPassword = await bcrypt.compare(password, user.password_hash);
     
     if (!validPassword) {
         return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
+    // 4. Generamos Token
     const token = jwt.sign(
       { user_id: user.id, rol: user.rol, marca_id: user.marca_id },
       process.env.JWT_SECRET as string,
       { expiresIn: '24h' }
     );
 
-    res.json({ token, user: { id: user.id, rol: user.rol, marca_id: user.marca_id } });
+    return res.json({ token, user: { id: user.id, rol: user.rol, marca_id: user.marca_id } });
   } catch (error) {
     console.error("🔥 ERROR EN EL LOGIN:", error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    return res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
 
@@ -91,7 +107,7 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
         },
         line_items: [{
           name: "Licencia Vendor Hub",
-          unit_price: 20000, 
+          unit_price: 29900, 
           quantity: 1
         }],
         charges: [{
@@ -110,24 +126,26 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
+    // 1. CREAMOS EL USUARIO (Ya con su mes de suscripción incluido)
     const insertUserQuery = `
-      INSERT INTO usuarios (id, nombre, email, password_hash, marca_id)
-      VALUES (gen_random_uuid(), $1, $2, $3, $4)
+      INSERT INTO usuarios (
+        id, nombre, email, password_hash, marca_id, 
+        suscripcion_inicio, suscripcion_fin, suscripcion_estado
+      )
+      VALUES (
+        gen_random_uuid(), $1, $2, $3, $4, 
+        NOW(), NOW() + INTERVAL '1 month', 'activa'
+      )
       RETURNING id;
     `;
+    // Pasamos los 4 valores requeridos (el 1 es el marca_id por defecto)
     const newUserResult = await client.query(insertUserQuery, [nombre, email, hashedPassword, 1]);
     const newUserId = newUserResult.rows[0].id;
 
+    // 2. ASIGNAMOS EL ROL DE VENDEDOR (Rol 2)
     const insertRoleQuery = `
-      INSERT INTO usuarios (
-      id, nombre, email, password_hash, marca_id, 
-      suscripcion_inicio, suscripcion_fin, suscripcion_estado
-       )
-      VALUES(
-      gen_random_uuid(), $1, $2, $3, $4,
-      NOW(), NOW() + INTERVAL '1 month', 'activa'
-       )
-      RETURNING id;
+      INSERT INTO usuario_roles (usuario_id, rol_id)
+      VALUES ($1, $2);
     `;
     await client.query(insertRoleQuery, [newUserId, 2]);
 
@@ -174,7 +192,7 @@ export const renewSubscription = async (req: Request, res: Response): Promise<an
       conekta.Order.create({
         currency: "MXN",
         customer_info: { name: user.nombre, email: email, phone: "+521000000000" },
-        line_items: [{ name: "Renovación Mensual Vendor Hub", unit_price: 20000, quantity: 1 }],
+        line_items: [{ name: "Renovación Mensual Vendor Hub", unit_price: 29900, quantity: 1 }],
         charges: [{ payment_method: { type: "card", token_id: token_id } }]
       }, (err: any, res: any) => {
         if (err) reject(err); else resolve(res);
