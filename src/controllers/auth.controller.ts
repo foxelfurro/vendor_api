@@ -15,10 +15,32 @@ conekta.api_key = process.env.CONEKTA_PRIVATE_KEY;
 conekta.locale = 'es';
 
 export const login = async (req: Request, res: Response): Promise<any> => {
-  const { email, password } = req.body;
+  // 1. Recibimos el captcha_token desde el body (junto con email y password)
+  const { email, password, captcha_token } = req.body;
+
+  // Validación inmediata: si no hay token, no hay acceso
+  if (!captcha_token) {
+    return res.status(400).json({ error: 'Falta la verificación de seguridad (CAPTCHA).' });
+  }
 
   try {
-    // 1. AQUÍ ESTÁ EL CAMBIO DEL SELECT (Agregamos u.suscripcion_fin)
+    // --- 🛡️ PASO A: VALIDACIÓN CON CLOUDFLARE ---
+    const verifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+    
+    const captchaResponse = await fetch(verifyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `secret=${process.env.TURNSTILE_SECRET_KEY}&response=${captcha_token}`,
+    });
+
+    const captchaData = await captchaResponse.json();
+
+    if (!captchaData.success) {
+      console.error("❌ Fallo de Captcha:", captchaData['error-codes']);
+      return res.status(403).json({ error: 'La verificación de seguridad ha fallado. Eres un bot 🤖' });
+    }
+
+    // --- 🔑 PASO B: LÓGICA DE LOGIN NORMAL (EL CADENERO) ---
     const query = `
       SELECT u.id, u.marca_id, u.password_hash, u.suscripcion_fin, ur.rol_id AS rol
       FROM usuarios u
@@ -33,7 +55,7 @@ export const login = async (req: Request, res: Response): Promise<any> => {
 
     const user = rows[0];
 
-    // 2. 🚨 EL CADENERO 🚨 (Esto no lo tenías en el código que me mandaste)
+    // EL CADENERO 🚨
     if (user.suscripcion_fin) {
       const ahora = new Date();
       const fechaFin = new Date(user.suscripcion_fin);
@@ -45,14 +67,14 @@ export const login = async (req: Request, res: Response): Promise<any> => {
       }
     }
 
-    // 3. Verificamos contraseña
+    // Verificamos contraseña
     const validPassword = await bcrypt.compare(password, user.password_hash);
     
     if (!validPassword) {
         return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
-    // 4. Generamos Token
+    // Generamos Token
     const token = jwt.sign(
       { user_id: user.id, rol: user.rol, marca_id: user.marca_id },
       process.env.JWT_SECRET as string,
@@ -60,6 +82,7 @@ export const login = async (req: Request, res: Response): Promise<any> => {
     );
 
     return res.json({ token, user: { id: user.id, rol: user.rol, marca_id: user.marca_id } });
+
   } catch (error) {
     console.error("🔥 ERROR EN EL LOGIN:", error);
     return res.status(500).json({ error: 'Error interno del servidor' });
