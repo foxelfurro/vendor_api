@@ -108,7 +108,11 @@ export const getMe = async (req: AuthRequest, res: Response) => {
 };
 
 export const subscribeAndCreateAccount = async (req: Request, res: Response) => {
-  const { token_id, nombre, email, password } = req.body;
+  const { token_id, nombre, email, password, captcha_token } = req.body;
+  const isHuman = await verifyCaptcha(captcha_token);
+  if (!isHuman) {
+    return res.status(403).json({ success: false, error: 'Verificación de seguridad fallida.' });
+  }
   const client = await pool.connect();
 
   try {
@@ -194,7 +198,11 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
 };
 // --- RENOVAR SUSCRIPCIÓN (Para usuarios vencidos) ---
 export const renewSubscription = async (req: Request, res: Response): Promise<any> => {
-  const { email, password, token_id, nombre_tarjeta } = req.body;
+  const { email, password, token_id, captcha_token } = req.body;
+  const isHuman = await verifyCaptcha(captcha_token);
+  if (!isHuman) {
+    return res.status(403).json({ error: 'Verificación de seguridad fallida.' });
+  }
   const client = await pool.connect();
 
   try {
@@ -351,5 +359,23 @@ export const resetPassword = async (req: Request, res: Response): Promise<any> =
   } catch (error) {
     console.error('Error en resetPassword:', error);
     return res.status(500).json({ error: 'Error al actualizar la contraseña.' });
+  }
+};
+
+// --- FUNCIÓN DE AYUDA PARA VALIDAR CAPTCHA ---
+const verifyCaptcha = async (token: string): Promise<boolean> => {
+  if (!token) return false;
+  try {
+    const verifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+    const response = await fetch(verifyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `secret=${process.env.TURNSTILE_SECRET_KEY}&response=${token}`,
+    });
+    const data = await response.json();
+    return data.success === true;
+  } catch (err) {
+    console.error("🔥 Error validando Captcha:", err);
+    return false;
   }
 };
