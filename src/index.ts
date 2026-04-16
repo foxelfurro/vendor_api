@@ -2,11 +2,12 @@ import express from 'express';
 import cors from 'cors';
 import { verifyToken, isAdmin } from './middlewares/auth.middleware';
 // 1. Importamos la nueva función de suscripción
-import { login, getMe, subscribeAndCreateAccount, forgotPassword, resetPassword} from './controllers/auth.controller';
+import { login, getMe, subscribeAndCreateAccount, forgotPassword, resetPassword, renewSubscription} from './controllers/auth.controller';
 import { getSalesHistory, registerSale } from './controllers/sales.controller';
 import { exploreCatalog, getInventory, addToInventory, updateInventoryStock } from './controllers/vendor.controller';
 import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem } from './controllers/admin.controller';
+
 
 const app = express();
 app.use(cors());
@@ -36,8 +37,12 @@ app.get('/vendor/dashboard-stats', verifyToken, getDashboardStats);
 app.post('/sales/register', verifyToken, registerSale); // Venta local
 app.get('/sales/history', verifyToken, getSalesHistory);
 
-// Perfil
+// Perfil y Autenticación
 app.get('/auth/me', verifyToken, getMe);
+
+// 👇 AGREGA LA RUTA DE RENOVACIÓN AQUÍ 👇
+app.post('/auth/renew', renewSubscription);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Servidor SaaS corriendo en puerto ${PORT}`));
+

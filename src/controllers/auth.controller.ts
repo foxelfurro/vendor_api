@@ -91,7 +91,7 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
         },
         line_items: [{
           name: "Licencia Vendor Hub",
-          unit_price: 50000, 
+          unit_price: 20000, 
           quantity: 1
         }],
         charges: [{
@@ -119,8 +119,15 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
     const newUserId = newUserResult.rows[0].id;
 
     const insertRoleQuery = `
-      INSERT INTO usuario_roles (usuario_id, rol_id)
-      VALUES ($1, $2);
+      INSERT INTO usuarios (
+      id, nombre, email, password_hash, marca_id, 
+      suscripcion_inicio, suscripcion_fin, suscripcion_estado
+       )
+      VALUES(
+      gen_random_uuid(), $1, $2, $3, $4,
+      NOW(), NOW() + INTERVAL '1 month', 'activa'
+       )
+      RETURNING id;
     `;
     await client.query(insertRoleQuery, [newUserId, 2]);
 
@@ -139,6 +146,56 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
     // Buscamos el mensaje de error de Conekta o el de la base de datos
     const msg = error.details?.[0]?.message || error.message || "Error en el proceso";
     res.status(400).json({ success: false, error: msg });
+  } finally {
+    client.release();
+  }
+  
+};
+// --- RENOVAR SUSCRIPCIÓN (Para usuarios vencidos) ---
+export const renewSubscription = async (req: Request, res: Response): Promise<any> => {
+  const { email, password, token_id, nombre_tarjeta } = req.body;
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // 1. Validamos que el usuario exista y la contraseña sea correcta
+   const userQuery = 'SELECT id, nombre, password_hash FROM usuarios WHERE email = $1';
+    const { rows } = await client.query(userQuery, [email]);
+
+    if (rows.length === 0) return res.status(404).json({ error: 'No existe una cuenta con este correo.' });
+    
+    const user = rows[0];
+    const validPassword = await bcrypt.compare(password, user.password_hash);
+    if (!validPassword) return res.status(401).json({ error: 'Contraseña incorrecta.' });
+
+    // 2. Cobramos con Conekta
+    const orden: any = await new Promise((resolve, reject) => {
+      conekta.Order.create({
+        currency: "MXN",
+        customer_info: { name: user.nombre, email: email, phone: "+521000000000" },
+        line_items: [{ name: "Renovación Mensual Vendor Hub", unit_price: 20000, quantity: 1 }],
+        charges: [{ payment_method: { type: "card", token_id: token_id } }]
+      }, (err: any, res: any) => {
+        if (err) reject(err); else resolve(res);
+      });
+    });
+
+    // 3. Le sumamos 1 MES de tiempo a partir de HOY
+    const updateQuery = `
+      UPDATE usuarios 
+      SET suscripcion_fin = NOW() + INTERVAL '1 month', suscripcion_estado = 'activa'
+      WHERE id = $1
+    `;
+    await client.query(updateQuery, [user.id]);
+
+    await client.query('COMMIT');
+    return res.status(200).json({ success: true, message: '¡Tu suscripción ha sido renovada con éxito!' });
+
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    const msg = error.details?.[0]?.message || error.message || "Error al renovar.";
+    return res.status(400).json({ success: false, error: msg });
   } finally {
     client.release();
   }
