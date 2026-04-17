@@ -106,13 +106,14 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Error al obtener datos del usuario' });
   }
 };
-
 export const subscribeAndCreateAccount = async (req: Request, res: Response) => {
   const { token_id, nombre, email, password, captcha_token } = req.body;
+  
   const isHuman = await verifyCaptcha(captcha_token);
   if (!isHuman) {
     return res.status(403).json({ success: false, error: 'Verificación de seguridad fallida.' });
   }
+  
   const client = await pool.connect();
 
   try {
@@ -123,12 +124,17 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
       throw new Error('Este correo ya está registrado.');
     }
 
- // 2. COBRO CON CONEKTA (Adaptado para la versión 3.x)
+    // 🚨 EL PARCHE SALVA-VIDAS: Si el nombre solo tiene una palabra, le agregamos "Joyería"
+    const nombreValido = nombre.trim().includes(' ') 
+      ? nombre.trim() 
+      : `${nombre.trim()} Joyeria`;
+
+    // 2. COBRO CON CONEKTA (Adaptado para la versión 3.x)
     const orden: any = await new Promise((resolve, reject) => {
       conekta.Order.create({
         currency: "MXN",
         customer_info: {
-          name: nombre,
+          name: nombreValido, // <--- AQUÍ CAMBIAMOS 'nombre' POR 'nombreValido'
           email: email,
           phone: "+521000000000"
         },
@@ -141,17 +147,18 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
           payment_method: { type: "card", token_id: token_id }
         }]
       }, function(err: any, res: any) {
-        // Esta es la función (callback) que Conekta estaba buscando
         if (err) {
-          reject(err); // Si falla el pago, lo mandamos al catch
+          reject(err); 
         } else {
-          resolve(res); // Si es exitoso, guardamos el resultado en 'orden'
+          resolve(res); 
         }
       });
     });
 
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
+    
+    // ... aquí sigue el resto de tu código normal (los INSERTS a tu base de datos)
 
     // 1. CREAMOS EL USUARIO (Ya con su mes de suscripción incluido)
     const insertUserQuery = `
@@ -199,17 +206,19 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
 // --- RENOVAR SUSCRIPCIÓN (Para usuarios vencidos) ---
 export const renewSubscription = async (req: Request, res: Response): Promise<any> => {
   const { email, password, token_id, captcha_token } = req.body;
+  
   const isHuman = await verifyCaptcha(captcha_token);
   if (!isHuman) {
     return res.status(403).json({ error: 'Verificación de seguridad fallida.' });
   }
+  
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
     // 1. Validamos que el usuario exista y la contraseña sea correcta
-   const userQuery = 'SELECT id, nombre, password_hash FROM usuarios WHERE email = $1';
+    const userQuery = 'SELECT id, nombre, password_hash FROM usuarios WHERE email = $1';
     const { rows } = await client.query(userQuery, [email]);
 
     if (rows.length === 0) return res.status(404).json({ error: 'No existe una cuenta con este correo.' });
@@ -218,11 +227,20 @@ export const renewSubscription = async (req: Request, res: Response): Promise<an
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) return res.status(401).json({ error: 'Contraseña incorrecta.' });
 
+    // 🚨 EL PARCHE: Arreglamos el nombre antes de mandarlo a Conekta
+    const nombreValidoRenovacion = user.nombre.trim().includes(' ') 
+      ? user.nombre.trim() 
+      : `${user.nombre.trim()} Joyeria`;
+
     // 2. Cobramos con Conekta
     const orden: any = await new Promise((resolve, reject) => {
       conekta.Order.create({
         currency: "MXN",
-        customer_info: { name: user.nombre, email: email, phone: "+521000000000" },
+        customer_info: { 
+          name: nombreValidoRenovacion, // <--- Usamos la variable parcheada
+          email: email, 
+          phone: "+521000000000" 
+        },
         line_items: [{ name: "Renovación Mensual Vendor Hub", unit_price: 29900, quantity: 1 }],
         charges: [{ payment_method: { type: "card", token_id: token_id } }]
       }, (err: any, res: any) => {
