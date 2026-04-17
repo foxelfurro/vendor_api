@@ -140,7 +140,7 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
         },
         line_items: [{
           name: "Licencia Vendor Hub",
-          unit_price: 29900, 
+          unit_price: 100, 
           quantity: 1
         }],
         charges: [{
