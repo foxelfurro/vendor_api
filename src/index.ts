@@ -40,7 +40,7 @@ app.get('/sales/history', verifyToken, getSalesHistory);
 // Perfil y Autenticación
 app.get('/auth/me', verifyToken, getMe);
 
-// 👇 AGREGA LA RUTA DE RENOVACIÓN AQUÍ 👇
+// RUTA DE RENOVACIÓN 
 app.post('/auth/renew', renewSubscription);
 
 const PORT = process.env.PORT || 3000;
