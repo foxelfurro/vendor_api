@@ -91,19 +91,21 @@ export const getMe = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.user_id;
   try {
     const query = `
-      SELECT u.id, u.nombre, u.email, u.marca_id, ur.rol_id AS rol
+      SELECT u.id, u.nombre, u.email, u.marca_id, u.suscripcion_fin, u.suscripcion_estado, ur.rol_id AS rol
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
       WHERE u.id = $1
     `;
     const { rows } = await pool.query(query, [userId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+    
     res.json(rows[0]);
   } catch (error) {
     console.error("🔥 ERROR EN AUTH/ME:", error);
     res.status(500).json({ error: 'Error al obtener datos del usuario' });
   }
 };
+
 export const subscribeAndCreateAccount = async (req: Request, res: Response) => {
   const { token_id, nombre, email, password, captcha_token } = req.body;
   
