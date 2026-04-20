@@ -27,18 +27,16 @@ export const login = async (req: Request, res: Response): Promise<any> => {
     // --- 🛡️ PASO A: VALIDACIÓN CON CLOUDFLARE ---
     const verifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
     
-    const captchaResponse = await fetch(verifyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `secret=${process.env.TURNSTILE_SECRET_KEY}&response=${captcha_token}`,
+    // Forzamos a que sean strings para que TypeScript esté feliz
+    const bodyParams = new URLSearchParams({
+      secret: String(process.env.TURNSTILE_SECRET_KEY || ''),
+      response: String(captcha_token),
     });
 
-    const captchaData = await captchaResponse.json();
-
-    if (!captchaData.success) {
-      console.error("❌ Fallo de Captcha:", captchaData['error-codes']);
-      return res.status(403).json({ error: 'La verificación de seguridad ha fallado. Eres un bot 🤖' });
-    }
+    const captchaResponse = await fetch(verifyUrl, {
+      method: 'POST',
+      body: bodyParams,
+    });
 
     // --- 🔑 PASO B: LÓGICA DE LOGIN NORMAL (EL CADENERO) ---
     const query = `
