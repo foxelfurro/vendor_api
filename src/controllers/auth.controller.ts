@@ -323,7 +323,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
       socketTimeout: 30000,     // 30 segundos de espera total
     });
 
-    const resetUrl = `https://lumin.qlatte.com/forgot-password?token=${resetToken}`;
+    const resetUrl = `https://lumin.qlatte.com/reset-password?token=${resetToken}`;
 
     const mailOptions = {
       from: `"Qlatte | Lumin" <${process.env.EMAIL_USER}>`,
