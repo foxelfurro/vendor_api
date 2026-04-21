@@ -72,17 +72,32 @@ export const login = async (req: Request, res: Response): Promise<any> => {
         return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
-    // Generamos Token
-    const token = jwt.sign(
+// GENERACIÓN Y CONFIGURACIÓN DE COOKIE 
+const token = jwt.sign(
       { user_id: user.id, rol: user.rol, marca_id: user.marca_id },
       process.env.JWT_SECRET as string,
       { expiresIn: '24h' }
     );
 
-    return res.json({ token, user: { id: user.id, rol: user.rol, marca_id: user.marca_id } });
+    // Configuramos la cookie HttpOnly
+    res.cookie('token', token, {
+      httpOnly: true,   
+      secure: true,      
+      sameSite: 'none',  
+      maxAge: 24 * 60 * 60 * 1000 
+    });
+
+    
+    return res.json({ 
+      user: { 
+        id: user.id, 
+        rol: user.rol, 
+        marca_id: user.marca_id 
+      } 
+    });
 
   } catch (error) {
-    console.error("🔥 ERROR EN EL LOGIN:", error);
+    console.error(" ERROR EN EL LOGIN:", error);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
@@ -396,4 +411,15 @@ const verifyCaptcha = async (token: string): Promise<boolean> => {
     console.error("🔥 Error validando Captcha:", err);
     return false;
   }
+};
+export const logout = (req: Request, res: Response) => {
+  // Para borrar una cookie, DEBES pasarle exactamente las mismas 
+  // opciones de seguridad con las que la creaste.
+  res.clearCookie('token', {
+    httpOnly: true,
+    secure: true,      // Debe coincidir con cómo la creaste
+    sameSite: 'none'   // Debe coincidir con cómo la creaste
+  });
+
+  return res.json({ message: 'Sesión cerrada con éxito' });
 };

@@ -1,23 +1,35 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser'; // 1. Importación hasta arriba
+
 import { verifyToken, isAdmin } from './middlewares/auth.middleware';
-// 1. Importamos la nueva función de suscripción
-import { login, getMe, subscribeAndCreateAccount, forgotPassword, resetPassword, renewSubscription} from './controllers/auth.controller';
+// 2. Importamos la función de logout aquí
+import { login, logout, getMe, subscribeAndCreateAccount, forgotPassword, resetPassword, renewSubscription} from './controllers/auth.controller';
 import { getSalesHistory, registerSale } from './controllers/sales.controller';
 import { exploreCatalog, getInventory, addToInventory, updateInventoryStock } from './controllers/vendor.controller';
 import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem } from './controllers/admin.controller';
 
-
 const app = express();
-app.use(cors());
+
+
+
+// 3. Activamos el parseo de cookies primero
+app.use(cookieParser());
+
+// 4. Configuramos el CORS una sola vez con el dominio base
+app.use(cors({
+    origin: ['https://lumin.qlatte.com', 'http://localhost:5173'],
+    credentials: true 
+}));
+
 app.use(express.json());
 
 // --- RUTAS PÚBLICAS (No requieren token) ---
 app.post('/auth/login', login);
+app.post('/auth/logout', logout); // <-- Añadimos la ruta de logout aquí
 app.post('/auth/forgot-password', forgotPassword);
 app.post('/auth/reset-password', resetPassword);
-// Esta es la ruta que usará el Checkout para crear nuevos vendedores
 app.post('/auth/subscribe', subscribeAndCreateAccount); 
 
 // --- RUTAS PROTEGIDAS (Requieren verifyToken) ---
@@ -45,4 +57,3 @@ app.post('/auth/renew', renewSubscription);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Servidor SaaS corriendo en puerto ${PORT}`));
-
