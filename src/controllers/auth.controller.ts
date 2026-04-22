@@ -80,12 +80,13 @@ const token = jwt.sign(
     );
 
     // Configuramos la cookie HttpOnly
-    res.cookie('token', token, {
-      httpOnly: true,   
-      secure: true,      
-      sameSite: 'none',  
-      maxAge: 24 * 60 * 60 * 1000 
-    });
+res.cookie('token', token, {
+  httpOnly: true,
+  secure: true,      // OBLIGATORIO: Porque ya usas HTTPS
+  sameSite: 'none',  // OBLIGATORIO: Para que la cookie viaje de api.qlatte.com a qlatte.com
+  maxAge: 24 * 60 * 60 * 1000, // 1 día
+  domain: '.qlatte.com' // EL PUNTO INICIAL ES CLAVE: une a la api y a la web
+});
 
     
     return res.json({ 
