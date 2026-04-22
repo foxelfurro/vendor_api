@@ -19,7 +19,7 @@ app.use(cookieParser());
 
 // 4. Configuramos el CORS una sola vez con el dominio base
 app.use(cors({
-    origin: ['https://lumin.qlatte.com', 'http://localhost:5173'],
+    origin: ['https://lumin.qlatte.com', 'http://localhost:5173','https://api.qlatte.com' ],
     credentials: true 
 }));
 
