@@ -4,8 +4,10 @@ import jwt from 'jsonwebtoken';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import bcrypt from 'bcrypt'; 
 import crypto from 'crypto';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
+// Inicializa la instancia de Resend con tu clave API (debes agregarla a tu .env)
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 // 1. IMPORTACIÓN CORREGIDA: Usamos require directamente sobre una constante en minúsculas
 const conekta = require('conekta');
@@ -306,29 +308,13 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     `;
     await pool.query(updateQuery, [resetToken, user.id]);
 
-    const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: Number(process.env.EMAIL_PORT),
-      secure: false, // TLS
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1.2'
-      },
-      // Aumentamos los tiempos al máximo para que Render no tire la toalla
-      connectionTimeout: 20000, // 20 segundos para conectar
-      greetingTimeout: 20000,   // 20 segundos para el saludo SMTP
-      socketTimeout: 30000,     // 30 segundos de espera total
-    });
-
     const resetUrl = `https://lumin.qlatte.com/reset-password?token=${resetToken}`;
 
-    const mailOptions = {
-      from: `"Qlatte | Lumin" <${process.env.EMAIL_USER}>`,
-      to: user.email,
+    // Enviamos el correo usando Resend en lugar de Nodemailer
+    const { data, error } = await resend.emails.send({
+      // IMPORTANTE: Este remitente debe ser un dominio verificado en tu cuenta de Resend
+      from: 'Qlatte | Lumin <no-reply@lumin.qlatte.com>', 
+      to: [user.email],
       subject: 'Recuperación de Contraseña - Qlatte Lumin',
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
@@ -339,21 +325,25 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
           <p style="margin-top: 30px; font-size: 12px; color: #666;">Si tú no solicitaste esto, puedes ignorar este correo de forma segura.</p>
         </div>
       `
-    };
+    });
 
-    await transporter.sendMail(mailOptions);
-      
-      // Si llega aquí, todo salió bien
-      return res.status(200).json({ message: "Correo enviado con éxito." });
-
-    } catch (error) {
-      console.error("Error detallado:", error);
-      
-      // SI FALLA EL CORREO, RESPONDEMOS UN 200 O 400, PERO NO DEJAMOS EL 500
+    // Resend devuelve un objeto 'error' si algo falla en la API
+    if (error) {
+      console.error("Error de Resend:", error);
       return res.status(400).json({ 
         message: "No pudimos enviar el correo en este momento, pero tu solicitud fue procesada. Inténtalo de nuevo en un minuto." 
       });
     }
+      
+    // Si llega aquí, todo salió bien
+    return res.status(200).json({ message: "Correo enviado con éxito." });
+
+  } catch (error) {
+    console.error("Error detallado en DB o servidor:", error);
+    return res.status(400).json({ 
+      message: "Ocurrió un error inesperado. Inténtalo de nuevo en un minuto." 
+    });
+  }
 };
 
 
