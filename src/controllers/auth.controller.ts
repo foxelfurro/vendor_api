@@ -313,7 +313,7 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     // Enviamos el correo usando Resend en lugar de Nodemailer
     const { data, error } = await resend.emails.send({
       // IMPORTANTE: Este remitente debe ser un dominio verificado en tu cuenta de Resend
-      from: 'Qlatte | Lumin <no-reply@lumin.qlatte.com>', 
+      from: 'Qlatte | Lumin <admin@qlatte.com>', 
       to: [user.email],
       subject: 'Recuperación de Contraseña - Qlatte Lumin',
       html: `
