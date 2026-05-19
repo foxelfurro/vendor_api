@@ -1,7 +1,6 @@
-import { Response } from 'express';
+import { Request, Response } from 'express'; // <-- Agregamos Request aquí
 import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
-
 // GET /vendor/explore
 // Muestra productos del catálogo de SU MARCA que AÚN NO están en su inventario
 export const exploreCatalog = async (req: AuthRequest, res: Response) => {
@@ -115,5 +114,53 @@ export const updateInventoryStock = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error("🔥 ERROR AL ACTUALIZAR STOCK:", error);
     res.status(500).json({ error: 'Error al actualizar el stock del producto.' });
+  }
+};
+
+// GET /store/:slug
+// Endpoint PÚBLICO para ver el catálogo de una vendedora específica
+export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
+  const { slug } = req.params;
+
+  try {
+    // 1. Buscar la vendedora por su slug (Asegúrate de agregar la columna store_slug a tu tabla de usuarios)
+    const userQuery = `SELECT id, nombre, telefono FROM usuarios WHERE store_slug = $1`;
+    const userResult = await pool.query(userQuery, [slug]);
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Catálogo no encontrado.' });
+    }
+
+    const vendor = userResult.rows[0];
+
+    // 2. Traer su inventario disponible haciendo JOIN con el catálogo maestro
+    const inventoryQuery = `
+      SELECT 
+        iv.id AS inventario_id,
+        iv.stock,
+        iv.precio_personalizado,
+        cm.id AS producto_maestro_id,
+        cm.nombre,
+        cm.descripcion,
+        cm.ruta_imagen,
+        cm.precio_sugerido
+      FROM inventario_vendedor iv
+      INNER JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
+      WHERE iv.vendedor_id = $1 AND iv.stock > 0;
+    `;
+    const inventoryResult = await pool.query(inventoryQuery, [vendor.id]);
+
+    // 3. Enviar la data combinada
+    res.json({
+      vendor: {
+        nombre: vendor.nombre,
+        telefono: vendor.telefono,
+      },
+      products: inventoryResult.rows
+    });
+
+  } catch (error) {
+    console.error("🔥 ERROR EN CATÁLOGO PÚBLICO:", error);
+    res.status(500).json({ error: 'Error al cargar el catálogo.' });
   }
 };

@@ -9,6 +9,7 @@ import { getSalesHistory, registerSale } from './controllers/sales.controller';
 import { exploreCatalog, getInventory, addToInventory, updateInventoryStock } from './controllers/vendor.controller';
 import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem } from './controllers/admin.controller';
+import { getSellerCatalogBySlug } from './controllers/vendor.controller';
 
 const app = express();
 
@@ -31,6 +32,7 @@ app.post('/auth/logout', logout); // <-- Añadimos la ruta de logout aquí
 app.post('/auth/forgot-password', forgotPassword);
 app.post('/auth/reset-password', resetPassword);
 app.post('/auth/subscribe', subscribeAndCreateAccount); 
+app.get('/store/:slug', getSellerCatalogBySlug);
 
 // --- RUTAS PROTEGIDAS (Requieren verifyToken) ---
 
