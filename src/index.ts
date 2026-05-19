@@ -6,10 +6,10 @@ import { verifyToken, isAdmin } from './middlewares/auth.middleware';
 // 2. Importamos la función de logout aquí
 import { login, logout, getMe, subscribeAndCreateAccount, forgotPassword, resetPassword, renewSubscription} from './controllers/auth.controller';
 import { getSalesHistory, registerSale } from './controllers/sales.controller';
-import { exploreCatalog, getInventory, addToInventory, updateInventoryStock } from './controllers/vendor.controller';
+import { exploreCatalog, getInventory, addToInventory, updateInventoryStock, getSellerCatalogBySlug, updateStoreSettings } from './controllers/vendor.controller';
 import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem } from './controllers/admin.controller';
-import { getSellerCatalogBySlug } from './controllers/vendor.controller';
+
 
 const app = express();
 
@@ -46,7 +46,7 @@ app.get('/vendor/inventory', verifyToken, getInventory);
 app.post('/vendor/inventory', verifyToken, addToInventory);
 app.put('/vendor/inventory/:id', verifyToken, updateInventoryStock);
 app.get('/vendor/dashboard-stats', verifyToken, getDashboardStats);
-
+app.put('/vendor/store-settings', verifyToken, updateStoreSettings);
 // Ventas y Registro
 app.post('/sales/register', verifyToken, registerSale); // Venta local
 app.get('/sales/history', verifyToken, getSalesHistory);

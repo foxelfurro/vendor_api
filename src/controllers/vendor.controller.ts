@@ -164,3 +164,45 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Error al cargar el catálogo.' });
   }
 };
+
+// PUT /vendor/store-settings
+export const updateStoreSettings = async (req: AuthRequest, res: Response): Promise<any> => {
+  const userId = req.user?.user_id;
+  const { store_slug, telefono } = req.body;
+
+  if (!store_slug || !telefono) {
+    return res.status(400).json({ error: 'El nombre de la tienda y el teléfono son obligatorios.' });
+  }
+
+  try {
+    // 1. Limpiamos los datos: slug en minúsculas sin caracteres raros, teléfono solo números
+    const cleanSlug = store_slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const cleanPhone = telefono.replace(/\D/g, '');
+
+    // 2. Verificamos que el slug no esté siendo usado por OTRA vendedora
+    const checkQuery = 'SELECT id FROM usuarios WHERE store_slug = $1 AND id != $2';
+    const checkResult = await pool.query(checkQuery, [cleanSlug, userId]);
+    
+    if (checkResult.rows.length > 0) {
+      return res.status(400).json({ error: 'Este nombre de tienda ya está en uso. Por favor elige otro.' });
+    }
+
+    // 3. Actualizamos los datos
+    const updateQuery = `
+      UPDATE usuarios 
+      SET store_slug = $1, telefono = $2 
+      WHERE id = $3 
+      RETURNING store_slug, telefono;
+    `;
+    const { rows } = await pool.query(updateQuery, [cleanSlug, cleanPhone, userId]);
+
+    return res.json({ 
+      message: '¡Configuración de tienda guardada exitosamente!', 
+      data: rows[0] 
+    });
+
+  } catch (error) {
+    console.error("🔥 ERROR AL ACTUALIZAR TIENDA:", error);
+    return res.status(500).json({ error: 'Error al actualizar la configuración de tu tienda.' });
+  }
+};
