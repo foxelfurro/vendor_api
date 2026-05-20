@@ -1,6 +1,11 @@
-import { Request, Response } from 'express'; // <-- Agregamos Request aquí
+import { Request, Response } from 'express';
 import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { Resend } from 'resend'; 
+
+// Inicializamos Resend (pon tu API key real en tu archivo .env)
+const resend = new Resend(process.env.RESEND_API_KEY || 're_tu_api_key_aqui');
+
 // GET /vendor/explore
 // Muestra productos del catálogo de SU MARCA que AÚN NO están en su inventario
 export const exploreCatalog = async (req: AuthRequest, res: Response) => {
@@ -8,7 +13,6 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
   const marcaId = req.user?.marca_id;
     
   try {
-    // Cambiamos catalogo_id por producto_maestro_id
     const query = `
       SELECT cm.* FROM catalogo_maestro cm
       LEFT JOIN inventario_vendedor iv 
@@ -24,6 +28,7 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
   }
 };
 
+// GET /vendor/inventory
 export const getInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
 
@@ -54,13 +59,11 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
 
 // POST /vendor/inventory
 // Vincula un producto del catálogo maestro al inventario personal del vendedor
-
 export const addToInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const { producto_maestro_id, stock, precio_personalizado } = req.body;
 
   try {
-    // Modificamos la query para que devuelva los datos del catálogo maestro tras insertar
     const query = `
       WITH nuevo_item AS (
         INSERT INTO inventario_vendedor 
@@ -79,10 +82,16 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
     
     res.status(201).json({
       message: '¡Producto agregado a tu inventario exitosamente!',
-      producto: rows[0] // Ahora este objeto incluirá la ruta_imagen
+      producto: rows[0]
     });
   } catch (error: any) {
-    // ... resto del manejo de errores
+    if (error.code === '23505') {
+      return res.status(409).json({ 
+        error: 'Esta joya ya está en tu inventario. Ve a la pestaña de "Inventario" para actualizar el stock.' 
+      });
+    }
+    console.error("🔥 ERROR AL AGREGAR AL INVENTARIO:", error);
+    res.status(500).json({ error: 'Hubo un error interno al guardar la joya en tu inventario.' });
   }
 };
 
@@ -90,7 +99,7 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
 // Actualiza la cantidad de stock de un producto existente en el inventario
 export const updateInventoryStock = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
-  const { id } = req.params; // Este será el inventario_id
+  const { id } = req.params; 
   const { stock } = req.body;
 
   try {
@@ -122,7 +131,6 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
   const { slug } = req.params;
 
   try {
-    // 1. Buscar la vendedora por su slug (Asegúrate de agregar la columna store_slug a tu tabla de usuarios)
     const userQuery = `SELECT id, nombre, telefono FROM usuarios WHERE store_slug = $1`;
     const userResult = await pool.query(userQuery, [slug]);
 
@@ -132,7 +140,6 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
 
     const vendor = userResult.rows[0];
 
-    // 2. Traer su inventario disponible haciendo JOIN con el catálogo maestro
     const inventoryQuery = `
       SELECT 
         iv.id AS inventario_id,
@@ -149,7 +156,6 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
     `;
     const inventoryResult = await pool.query(inventoryQuery, [vendor.id]);
 
-    // 3. Enviar la data combinada
     res.json({
       vendor: {
         nombre: vendor.nombre,
@@ -174,11 +180,9 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
   }
 
   try {
-    // 1. Limpiamos los datos: slug en minúsculas sin caracteres raros, teléfono solo números
     const cleanSlug = store_slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     const cleanPhone = telefono.replace(/\D/g, '');
 
-    // 2. Verificamos que el slug no esté siendo usado por OTRA vendedora
     const checkQuery = 'SELECT id FROM usuarios WHERE store_slug = $1 AND id != $2';
     const checkResult = await pool.query(checkQuery, [cleanSlug, userId]);
     
@@ -186,7 +190,6 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
       return res.status(400).json({ error: 'Este nombre de tienda ya está en uso. Por favor elige otro.' });
     }
 
-    // 3. Actualizamos los datos
     const updateQuery = `
       UPDATE usuarios 
       SET store_slug = $1, telefono = $2 
@@ -204,12 +207,13 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
     console.error(" ERROR AL ACTUALIZAR TIENDA:", error);
     return res.status(500).json({ error: 'Error al actualizar la configuración de tu tienda.' });
   }
-
 };
 
 // POST /vendor/inventory/custom
+// Registra una joya propia del vendedor y ENVÍA NOTIFICACIÓN SILENCIOSA
 export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
+  const vendorEmail = req.user?.email || 'Vendedor Anónimo'; 
   const { nombre, sku, stock, precio_personalizado } = req.body;
 
   if (!nombre || !sku || stock === undefined || precio_personalizado === undefined) {
@@ -217,6 +221,7 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
   }
 
   try {
+    // 1. Guardar la joya "custom" en la tabla pivote
     const query = `
       INSERT INTO inventario_vendedor 
         (vendedor_id, producto_maestro_id, nombre_custom, sku_custom, stock, precio_personalizado)
@@ -228,6 +233,24 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
     const values = [vendorId, nombre, sku, stock, precio_personalizado];
     const { rows } = await pool.query(query, values);
     
+    // 2. MAGIA SILENCIOSA: Notificar al administrador por correo en segundo plano (sin await)
+    resend.emails.send({
+      from: 'Qlatte App <onboarding@resend.dev>', // Cambia por tu dominio verificado
+      to: 'tu_correo_de_administrador@gmail.com', // El correo donde quieres recibir el aviso
+      subject: `💎 Nueva Pieza Propia: ${nombre}`,
+      html: `
+        <h2>Un vendedor ha registrado una pieza fuera del catálogo maestro</h2>
+        <p>Esta información te sirve como estudio de mercado pasivo para futuras actualizaciones.</p>
+        <ul>
+          <li><strong>Vendedor:</strong> ${vendorEmail}</li>
+          <li><strong>Nombre de la pieza:</strong> ${nombre}</li>
+          <li><strong>SKU asignado:</strong> ${sku}</li>
+          <li><strong>Precio de venta:</strong> $${precio_personalizado}</li>
+        </ul>
+      `
+    }).catch(err => console.error("Error silencioso de Resend:", err));
+
+    // 3. Responder de inmediato al frontend
     res.status(201).json({
       message: '¡Joya personalizada agregada a tu inventario!',
       producto: rows[0] 
@@ -236,35 +259,5 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
   } catch (error: any) {
     console.error("🔥 ERROR AL AGREGAR JOYA CUSTOM:", error);
     res.status(500).json({ error: 'Hubo un error al guardar tu joya personalizada.' });
-  }
-};
-import { Resend } from 'resend';
-
-// Asegúrate de poner tu API Key real en tu archivo .env
-const resend = new Resend(process.env.RESEND_API_KEY || 're_tu_api_key_aqui'); 
-
-// POST /vendor/request-catalog
-export const requestCatalogItem = async (req: AuthRequest, res: Response) => {
-  const vendorEmail = req.user?.email || 'Vendedor Anónimo';
-  const { busqueda, descripcion } = req.body;
-
-  try {
-    await resend.emails.send({
-      from: 'Qlatte App <onboarding@resend.dev>', // Si ya tienes dominio verificado, usa el tuyo
-      to: 'tu_correo_de_administrador@gmail.com', // El correo donde quieres recibir estas sugerencias
-      subject: `💡 Nueva sugerencia de joya: "${busqueda}"`,
-      html: `
-        <h2>Un vendedor ha solicitado una nueva pieza para el Catálogo Maestro</h2>
-        <p><strong>Buscó:</strong> ${busqueda}</p>
-        <p><strong>Detalles adicionales:</strong> ${descripcion}</p>
-        <hr />
-        <p><small>Solicitud enviada desde la cuenta de: ${vendorEmail}</small></p>
-      `
-    });
-
-    res.status(200).json({ message: "Sugerencia enviada correctamente." });
-  } catch (error) {
-    console.error("Error al enviar email con Resend:", error);
-    res.status(500).json({ error: "Error al procesar la sugerencia." });
   }
 };
