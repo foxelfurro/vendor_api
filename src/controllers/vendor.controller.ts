@@ -124,7 +124,6 @@ export const updateInventoryStock = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Error al actualizar el stock del producto.' });
   }
 };
-
 // GET /store/:slug
 // Endpoint PÚBLICO para ver el catálogo de una vendedora específica
 export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
@@ -156,10 +155,14 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
     `;
     const inventoryResult = await pool.query(inventoryQuery, [vendor.id]);
 
+    // Quitamos el prefijo +52 antes de mandarlo al front para que encaje 
+    // perfectamente en tu componente con el span hardcodeado
+    const telefonoDigitos = vendor.telefono ? vendor.telefono.replace(/^\+52/, '') : '';
+
     res.json({
       vendor: {
-        nombre: vendor.store_name,     // ← ahora usamos store_name
-        telefono: vendor.telefono,     // incluye +52
+        nombre: vendor.store_name,
+        telefono: telefonoDigitos, // Envía solo los 10 dígitos (ej: 5512345678)
       },
       products: inventoryResult.rows
     });
@@ -190,17 +193,17 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
     if (!cleanSlug) {
       return res.status(400).json({ error: 'El enlace generado no es válido.' });
     }
-    // 1. Limpiar por si acaso el usuario metió un espacio
-    let cleanPhone = telefono.replace(/[^\d+]/g, '');
+
+    // 1. Limpiar por si acaso el usuario metió un espacio o guion en el string de 10 dígitos
+    let cleanPhone = telefono.replace(/[^\d]/g, '');
 
     // 2. Validar que vengan EXACTAMENTE 10 dígitos numéricos
     if (!/^\d{10}$/.test(cleanPhone)) {
       return res.status(400).json({ error: 'El teléfono debe tener exactamente 10 dígitos.' });
     }
 
-    // 3. Como ya pasó la validación, le concatenas el +52 hardcodeado para tu base de datos / API
+    // 3. Le concatenamos el +52 para guardarlo estandarizado en la Base de Datos
     const telefonoCompleto = `+52${cleanPhone}`; 
-    // Ahora telefonoCompleto vale "+525512345678"
 
     // Verificar unicidad del slug (excluyendo al usuario actual)
     const checkQuery = 'SELECT id FROM usuarios WHERE store_slug = $1 AND id != $2';
@@ -210,17 +213,24 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
       return res.status(400).json({ error: 'Este enlace de tienda ya está en uso. Por favor elige otro nombre.' });
     }
 
+    // CORRECCIÓN AQUÍ: Pasamos $3 como telefonoCompleto en lugar de cleanPhone
     const updateQuery = `
       UPDATE usuarios 
       SET store_name = $1, store_slug = $2, telefono = $3
       WHERE id = $4 
       RETURNING store_name, store_slug, telefono;
     `;
-    const { rows } = await pool.query(updateQuery, [store_name.trim(), cleanSlug, cleanPhone, userId]);
+    const { rows } = await pool.query(updateQuery, [store_name.trim(), cleanSlug, telefonoCompleto, userId]);
+
+    // Devolvemos el teléfono limpio de nuevo al front para actualizar el estado del formulario local
+    const dataResponse = {
+      ...rows[0],
+      telefono: rows[0].telefono.replace(/^\+52/, '')
+    };
 
     return res.json({ 
       message: '¡Configuración de tienda guardada exitosamente!', 
-      data: rows[0] 
+      data: dataResponse 
     });
 
   } catch (error) {
