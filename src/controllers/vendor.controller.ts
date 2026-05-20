@@ -235,8 +235,8 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
     
     // 2. MAGIA SILENCIOSA: Notificar al administrador por correo en segundo plano (sin await)
     resend.emails.send({
-      from: 'Qlatte App <onboarding@resend.dev>', // Cambia por tu dominio verificado
-      to: 'tu_correo_de_administrador@gmail.com', // El correo donde quieres recibir el aviso
+      from: 'Qlatte App <admin@qlatte.com>', // Cambia por tu dominio verificado
+      to: 'admin@qlatte.com', // El correo donde quieres recibir el aviso
       subject: `💎 Nueva Pieza Propia: ${nombre}`,
       html: `
         <h2>Un vendedor ha registrado una pieza fuera del catálogo maestro</h2>
