@@ -234,10 +234,15 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
     const { rows } = await pool.query(query, values);
     
     // 2. MAGIA SILENCIOSA: Notificar al administrador por correo en segundo plano (sin await)
-    resend.emails.send({
-      from: 'Qlatte App <admin@qlatte.com>', // Cambia por tu dominio verificado
-      to: 'admin@qlatte.com', // El correo donde quieres recibir el aviso
+   resend.emails.send({
+      // EL FROM TIENE QUE SER EL DE RESEND (obligatorio hasta verificar el dominio)
+      from: 'Notificaciones Qlatte <onboarding@resend.dev>', 
+      
+      // EL TO DEBE SER TU CORREO DE CUENTA (el cual es admin@qlatte.com)
+      to: 'admin@qlatte.com', 
+      
       subject: `💎 Nueva Pieza Propia: ${nombre}`,
+  
       html: `
         <h2>Un vendedor ha registrado una pieza fuera del catálogo maestro</h2>
         <p>Esta información te sirve como estudio de mercado pasivo para futuras actualizaciones.</p>
