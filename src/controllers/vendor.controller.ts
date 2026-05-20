@@ -176,6 +176,9 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
 // PUT /vendor/store-settings
 export const updateStoreSettings = async (req: AuthRequest, res: Response): Promise<any> => {
   const userId = req.user?.user_id;
+
+console.log("👉 LO QUE LLEGA AL BACKEND (req.body):", req.body);
+
   const { store_name, store_slug, telefono } = req.body;
 
   if (!store_name || !store_slug || !telefono) {
