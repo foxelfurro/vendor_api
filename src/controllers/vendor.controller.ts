@@ -238,3 +238,33 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Hubo un error al guardar tu joya personalizada.' });
   }
 };
+import { Resend } from 'resend';
+
+// Asegúrate de poner tu API Key real en tu archivo .env
+const resend = new Resend(process.env.RESEND_API_KEY || 're_tu_api_key_aqui'); 
+
+// POST /vendor/request-catalog
+export const requestCatalogItem = async (req: AuthRequest, res: Response) => {
+  const vendorEmail = req.user?.email || 'Vendedor Anónimo';
+  const { busqueda, descripcion } = req.body;
+
+  try {
+    await resend.emails.send({
+      from: 'Qlatte App <onboarding@resend.dev>', // Si ya tienes dominio verificado, usa el tuyo
+      to: 'tu_correo_de_administrador@gmail.com', // El correo donde quieres recibir estas sugerencias
+      subject: `💡 Nueva sugerencia de joya: "${busqueda}"`,
+      html: `
+        <h2>Un vendedor ha solicitado una nueva pieza para el Catálogo Maestro</h2>
+        <p><strong>Buscó:</strong> ${busqueda}</p>
+        <p><strong>Detalles adicionales:</strong> ${descripcion}</p>
+        <hr />
+        <p><small>Solicitud enviada desde la cuenta de: ${vendorEmail}</small></p>
+      `
+    });
+
+    res.status(200).json({ message: "Sugerencia enviada correctamente." });
+  } catch (error) {
+    console.error("Error al enviar email con Resend:", error);
+    res.status(500).json({ error: "Error al procesar la sugerencia." });
+  }
+};
