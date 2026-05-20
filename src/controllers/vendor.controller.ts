@@ -190,24 +190,17 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
     if (!cleanSlug) {
       return res.status(400).json({ error: 'El enlace generado no es válido.' });
     }
-    // 1. Limpiar espacios y caracteres raros
+    // 1. Limpiar por si acaso el usuario metió un espacio
     let cleanPhone = telefono.replace(/[^\d+]/g, '');
 
-    // 2. Si el usuario no escribió el +52, se lo agregamos automáticamente
-    if (!cleanPhone.startsWith('+52')) {
-      // Si empezó solo con "52", le ponemos el "+"
-      if (cleanPhone.startsWith('52')) {
-        cleanPhone = '+' + cleanPhone;
-      } else {
-        // Si solo puso los 10 dígitos, le sumamos el "+52"
-        cleanPhone = '+52' + cleanPhone;
-      }
+    // 2. Validar que vengan EXACTAMENTE 10 dígitos numéricos
+    if (!/^\d{10}$/.test(cleanPhone)) {
+      return res.status(400).json({ error: 'El teléfono debe tener exactamente 10 dígitos.' });
     }
 
-    // 3. Ahora validamos que tenga la estructura perfecta (+52 + 10 dígitos)
-    if (!/^\+52\d{10}$/.test(cleanPhone)) {
-      return res.status(400).json({ error: 'El número de teléfono de México debe tener 10 dígitos.' });
-    }
+    // 3. Como ya pasó la validación, le concatenas el +52 hardcodeado para tu base de datos / API
+    const telefonoCompleto = `+52${cleanPhone}`; 
+    // Ahora telefonoCompleto vale "+525512345678"
 
     // Verificar unicidad del slug (excluyendo al usuario actual)
     const checkQuery = 'SELECT id FROM usuarios WHERE store_slug = $1 AND id != $2';
