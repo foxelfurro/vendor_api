@@ -190,13 +190,23 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
     if (!cleanSlug) {
       return res.status(400).json({ error: 'El enlace generado no es válido.' });
     }
-
-    // Limpiar teléfono: eliminar espacios, guiones, paréntesis, pero conservar el '+'
+    // 1. Limpiar espacios y caracteres raros
     let cleanPhone = telefono.replace(/[^\d+]/g, '');
-    
-    // Validar formato mexicano: +52 seguido de 10 dígitos
+
+    // 2. Si el usuario no escribió el +52, se lo agregamos automáticamente
+    if (!cleanPhone.startsWith('+52')) {
+      // Si empezó solo con "52", le ponemos el "+"
+      if (cleanPhone.startsWith('52')) {
+        cleanPhone = '+' + cleanPhone;
+      } else {
+        // Si solo puso los 10 dígitos, le sumamos el "+52"
+        cleanPhone = '+52' + cleanPhone;
+      }
+    }
+
+    // 3. Ahora validamos que tenga la estructura perfecta (+52 + 10 dígitos)
     if (!/^\+52\d{10}$/.test(cleanPhone)) {
-      return res.status(400).json({ error: 'El teléfono debe comenzar con +52 y tener 10 dígitos.' });
+      return res.status(400).json({ error: 'El número de teléfono de México debe tener 10 dígitos.' });
     }
 
     // Verificar unicidad del slug (excluyendo al usuario actual)
