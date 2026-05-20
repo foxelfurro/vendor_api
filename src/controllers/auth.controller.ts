@@ -110,7 +110,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
   try {
     const query = `
       SELECT u.id, u.nombre, u.email, u.marca_id, u.suscripcion_fin, u.suscripcion_estado, ur.rol_id AS rol,
-             u.store_slug, u.telefono -- <-- ESTOS DOS CAMPOS SON NUEVOS
+             u.store_slug, u.telefono, u.store_name
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
       WHERE u.id = $1
@@ -120,7 +120,8 @@ export const getMe = async (req: AuthRequest, res: Response) => {
     
     res.json(rows[0]);
   } catch (error) {
-    // ...
+    console.error('ERROR EN GET /me:', error);
+    res.status(500).json({ error: 'Error al obtener datos del usuario' });
   }
 };
 

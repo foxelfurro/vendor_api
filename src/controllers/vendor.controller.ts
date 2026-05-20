@@ -131,7 +131,7 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
   const { slug } = req.params;
 
   try {
-    const userQuery = `SELECT id, nombre, telefono FROM usuarios WHERE store_slug = $1`;
+    const userQuery = `SELECT id, store_name, telefono FROM usuarios WHERE store_slug = $1`;
     const userResult = await pool.query(userQuery, [slug]);
 
     if (userResult.rows.length === 0) {
@@ -158,8 +158,8 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
 
     res.json({
       vendor: {
-        nombre: vendor.nombre,
-        telefono: vendor.telefono,
+        nombre: vendor.store_name,     // ← ahora usamos store_name
+        telefono: vendor.telefono,     // incluye +52
       },
       products: inventoryResult.rows
     });
@@ -173,30 +173,47 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
 // PUT /vendor/store-settings
 export const updateStoreSettings = async (req: AuthRequest, res: Response): Promise<any> => {
   const userId = req.user?.user_id;
-  const { store_slug, telefono } = req.body;
+  const { store_name, store_slug, telefono } = req.body;
 
-  if (!store_slug || !telefono) {
-    return res.status(400).json({ error: 'El nombre de la tienda y el teléfono son obligatorios.' });
+  if (!store_name || !store_slug || !telefono) {
+    return res.status(400).json({ error: 'El nombre de la tienda, el slug y el teléfono son obligatorios.' });
   }
 
   try {
-    const cleanSlug = store_slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    const cleanPhone = telefono.replace(/\D/g, '');
+    // Limpiar slug: solo minúsculas, números, sin espacios ni caracteres especiales
+    const cleanSlug = store_slug
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '')   // elimina todo lo que no sea letra, número o guión
+      .replace(/-+/g, '-')          // múltiples guiones a uno solo
+      .replace(/^-|-$/g, '');       // quita guiones al inicio o final
 
+    if (!cleanSlug) {
+      return res.status(400).json({ error: 'El enlace generado no es válido.' });
+    }
+
+    // Limpiar teléfono: eliminar espacios, guiones, paréntesis, pero conservar el '+'
+    let cleanPhone = telefono.replace(/[^\d+]/g, '');
+    
+    // Validar formato mexicano: +52 seguido de 10 dígitos
+    if (!/^\+52\d{10}$/.test(cleanPhone)) {
+      return res.status(400).json({ error: 'El teléfono debe comenzar con +52 y tener 10 dígitos.' });
+    }
+
+    // Verificar unicidad del slug (excluyendo al usuario actual)
     const checkQuery = 'SELECT id FROM usuarios WHERE store_slug = $1 AND id != $2';
     const checkResult = await pool.query(checkQuery, [cleanSlug, userId]);
     
     if (checkResult.rows.length > 0) {
-      return res.status(400).json({ error: 'Este nombre de tienda ya está en uso. Por favor elige otro.' });
+      return res.status(400).json({ error: 'Este enlace de tienda ya está en uso. Por favor elige otro nombre.' });
     }
 
     const updateQuery = `
       UPDATE usuarios 
-      SET store_slug = $1, telefono = $2 
-      WHERE id = $3 
-      RETURNING store_slug, telefono;
+      SET store_name = $1, store_slug = $2, telefono = $3
+      WHERE id = $4 
+      RETURNING store_name, store_slug, telefono;
     `;
-    const { rows } = await pool.query(updateQuery, [cleanSlug, cleanPhone, userId]);
+    const { rows } = await pool.query(updateQuery, [store_name.trim(), cleanSlug, cleanPhone, userId]);
 
     return res.json({ 
       message: '¡Configuración de tienda guardada exitosamente!', 
@@ -204,7 +221,7 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
     });
 
   } catch (error) {
-    console.error(" ERROR AL ACTUALIZAR TIENDA:", error);
+    console.error("ERROR AL ACTUALIZAR TIENDA:", error);
     return res.status(500).json({ error: 'Error al actualizar la configuración de tu tienda.' });
   }
 };
