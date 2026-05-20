@@ -24,25 +24,24 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// GET /vendor/inventory
-// Muestra el inventario personal combinando datos del catálogo maestro
 export const getInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
 
   try {
-    // Cambiamos iv.catalogo_id por iv.producto_maestro_id
     const query = `
       SELECT 
         iv.id AS inventario_id,
         iv.stock,
         iv.precio_personalizado,
-        cm.id AS producto_maestro_id,
-        cm.sku,
-        cm.nombre,
-        cm.precio_sugerido,
-        cm.ruta_imagen
+        iv.producto_maestro_id,
+        COALESCE(cm.sku, iv.sku_custom) AS sku,
+        COALESCE(cm.nombre, iv.nombre_custom) AS nombre,
+        COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
+        COALESCE(cm.ruta_imagen, iv.imagen_custom) AS ruta_imagen,
+        -- Bandera útil para el frontend:
+        CASE WHEN iv.producto_maestro_id IS NULL THEN true ELSE false END AS es_custom
       FROM inventario_vendedor iv
-      INNER JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
+      LEFT JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
       WHERE iv.vendedor_id = $1;
     `;
     const { rows } = await pool.query(query, [vendorId]);
@@ -202,7 +201,40 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
     });
 
   } catch (error) {
-    console.error("🔥 ERROR AL ACTUALIZAR TIENDA:", error);
+    console.error(" ERROR AL ACTUALIZAR TIENDA:", error);
     return res.status(500).json({ error: 'Error al actualizar la configuración de tu tienda.' });
+  }
+
+};
+
+// POST /vendor/inventory/custom
+export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
+  const vendorId = req.user?.user_id;
+  const { nombre, sku, stock, precio_personalizado } = req.body;
+
+  if (!nombre || !sku || stock === undefined || precio_personalizado === undefined) {
+    return res.status(400).json({ error: 'Faltan datos para crear tu joya personalizada.' });
+  }
+
+  try {
+    const query = `
+      INSERT INTO inventario_vendedor 
+        (vendedor_id, producto_maestro_id, nombre_custom, sku_custom, stock, precio_personalizado)
+      VALUES 
+        ($1, NULL, $2, $3, $4, $5)
+      RETURNING *;
+    `;
+    
+    const values = [vendorId, nombre, sku, stock, precio_personalizado];
+    const { rows } = await pool.query(query, values);
+    
+    res.status(201).json({
+      message: '¡Joya personalizada agregada a tu inventario!',
+      producto: rows[0] 
+    });
+
+  } catch (error: any) {
+    console.error("🔥 ERROR AL AGREGAR JOYA CUSTOM:", error);
+    res.status(500).json({ error: 'Hubo un error al guardar tu joya personalizada.' });
   }
 };
