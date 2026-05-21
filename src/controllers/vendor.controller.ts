@@ -14,10 +14,21 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
     
   try {
     const query = `
-      SELECT cm.* FROM catalogo_maestro cm
-      LEFT JOIN inventario_vendedor iv 
+      SELECT
+        cm.id,
+        cm.sku,
+        cm.nombre,
+        cm.descripcion,
+        cm.ruta_imagen,
+        cm.precio_sugerido,
+        cm.marca_id,
+        cm.categoria_id,
+        c.nombre AS categoria
+      FROM catalogo_maestro cm
+      LEFT JOIN inventario_vendedor iv
         ON cm.id = iv.producto_maestro_id AND iv.vendedor_id = $1
-      WHERE cm.marca_id = $2 
+      LEFT JOIN categorias c ON cm.categoria_id = c.id
+      WHERE cm.marca_id = $2
         AND iv.producto_maestro_id IS NULL;
     `;
     const { rows } = await pool.query(query, [vendorId, marcaId]);
@@ -44,9 +55,11 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
         COALESCE(cm.nombre, iv.nombre_custom) AS nombre,
         COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
         COALESCE(cm.ruta_imagen, iv.imagen_custom) AS ruta_imagen,
+        c.nombre AS categoria,
         CASE WHEN iv.producto_maestro_id IS NULL THEN true ELSE false END AS es_custom
       FROM inventario_vendedor iv
       LEFT JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
+      LEFT JOIN categorias c ON cm.categoria_id = c.id
       WHERE iv.vendedor_id = $1;
     `;
     const { rows } = await pool.query(query, [vendorId]);

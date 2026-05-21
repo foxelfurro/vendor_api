@@ -10,7 +10,7 @@ import { getSalesHistory, registerSale } from './controllers/sales.controller';
 import { exploreCatalog, getInventory, addToInventory, updateInventoryItem, deleteInventoryItem, getSellerCatalogBySlug, updateStoreSettings, addCustomToInventory } from './controllers/vendor.controller';
 
 import { getDashboardStats } from './controllers/dashboard.controller';
-import { createUser, createCatalogItem } from './controllers/admin.controller';
+import { createUser, createCatalogItem, getCategorias } from './controllers/admin.controller';
 
 
 const app = express();
@@ -42,6 +42,7 @@ app.get('/store/:slug', getSellerCatalogBySlug);
 // Administración
 app.post('/admin/users', verifyToken, isAdmin, createUser);
 app.post('/admin/catalogo', verifyToken, isAdmin, createCatalogItem);
+app.get('/admin/categorias', verifyToken, isAdmin, getCategorias);
 
 // Operaciones de Vendedor
 app.get('/vendor/explore', verifyToken, exploreCatalog);

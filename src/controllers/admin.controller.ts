@@ -62,13 +62,36 @@ export const createCatalogItem = async (req: Request, res: Response) => {
         const values = [sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id];
         const result = await pool.query(query, values);
 
-        res.status(201).json({ 
+        res.status(201).json({
             message: "Joya agregada exitosamente al catálogo maestro",
-            joya: result.rows[0] 
+            joya: result.rows[0]
         });
-    } catch (error) {
+    } catch (error: any) {
         console.error("Error al insertar joya:", error);
+
+        // SKU duplicado (viola la restricción UNIQUE sku_unico)
+        if (error.code === '23505') {
+            return res.status(400).json({ message: "Ya existe una joya con ese SKU" });
+        }
+        // categoria_id (o marca_id) inexistente: viola la llave foránea
+        if (error.code === '23503') {
+            return res.status(400).json({ message: "La categoría o la marca seleccionada no existe" });
+        }
+
         res.status(500).json({ message: "Error al guardar en la base de datos" });
+    }
+};
+
+// GET /admin/categorias
+// Lista las categorías disponibles para poblar el selector del panel de administración
+export const getCategorias = async (_req: Request, res: Response): Promise<any> => {
+    try {
+        const query = `SELECT id, nombre FROM categorias ORDER BY nombre ASC;`;
+        const result = await pool.query(query);
+        return res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Error al obtener categorías:", error);
+        return res.status(500).json({ message: "Error al obtener las categorías" });
     }
 };
 
