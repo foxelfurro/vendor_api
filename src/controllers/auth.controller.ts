@@ -176,18 +176,16 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
 
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
-    
-    // ... aquí sigue el resto de tu código normal (los INSERTS a tu base de datos)
 
-    // 1. CREAMOS EL USUARIO (Ya con su mes de suscripción incluido)
+// 1. CREAMOS EL USUARIO 
     const insertUserQuery = `
-      INSERT INTO usuarios (
+      INSERT INTO usuarios (ya, 
         id, nombre, email, password_hash, marca_id, 
-        suscripcion_inicio, suscripcion_fin, suscripcion_estado
+        suscripcion_inicio, suscripcion_fin, suscripcion_estado, activo
       )
       VALUES (
         gen_random_uuid(), $1, $2, $3, $4, 
-        NOW(), NOW() + INTERVAL '1 month', 'activa'
+        NOW(), NOW() + INTERVAL '1 month', 'activa', true
       )
       RETURNING id;
     `;

@@ -7,7 +7,7 @@ import { login, logout, getMe, subscribeAndCreateAccount, forgotPassword, resetP
 import { getSalesHistory, registerSale } from './controllers/sales.controller';
 
 // 1. IMPORTACIONES DEL VENDEDOR: Quitamos requestCatalogItem y agregamos addCustomToInventory
-import { exploreCatalog, getInventory, addToInventory, updateInventoryStock, getSellerCatalogBySlug, updateStoreSettings, addCustomToInventory } from './controllers/vendor.controller';
+import { exploreCatalog, getInventory, addToInventory, updateInventoryItem, deleteInventoryItem, getSellerCatalogBySlug, updateStoreSettings, addCustomToInventory } from './controllers/vendor.controller';
 
 import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem } from './controllers/admin.controller';
@@ -44,12 +44,15 @@ app.post('/admin/catalogo', verifyToken, isAdmin, createCatalogItem);
 // Operaciones de Vendedor
 app.get('/vendor/explore', verifyToken, exploreCatalog);
 app.get('/vendor/inventory', verifyToken, getInventory);
+// ACTUALIZADO: Maneja cambios de precio y stock
+app.put('/vendor/inventory/:id', verifyToken, updateInventoryItem); 
 
+// NUEVO: Elimina la joya de la vitrina
+app.delete('/vendor/inventory/:id', verifyToken, deleteInventoryItem);
 // 2. RUTA DE JOYA CUSTOM: La agregamos aquí
 app.post('/vendor/inventory/custom', verifyToken, addCustomToInventory);
 
 app.post('/vendor/inventory', verifyToken, addToInventory);
-app.put('/vendor/inventory/:id', verifyToken, updateInventoryStock);
 app.get('/vendor/dashboard-stats', verifyToken, getDashboardStats);
 app.put('/vendor/store-settings', verifyToken, updateStoreSettings);
 

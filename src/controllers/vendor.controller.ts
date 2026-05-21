@@ -95,33 +95,62 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// PUT /vendor/inventory/:id
-// Actualiza la cantidad de stock de un producto existente en el inventario
-export const updateInventoryStock = async (req: AuthRequest, res: Response) => {
+// Actualiza la cantidad de stock y/o el precio personalizado de un producto en el inventario
+export const updateInventoryItem = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
-  const { id } = req.params; 
-  const { stock } = req.body;
+  const { id } = req.params; // Este es el inventario_id
+  const { stock, precio_personalizado } = req.body;
 
   try {
+    // Usamos COALESCE para que si uno de los dos campos no viene en el body, conserve su valor actual
     const query = `
       UPDATE inventario_vendedor
-      SET stock = $1
-      WHERE id = $2 AND vendedor_id = $3
+      SET 
+        stock = COALESCE($1, stock),
+        precio_personalizado = COALESCE($2, precio_personalizado)
+      WHERE id = $3 AND vendedor_id = $4
       RETURNING *;
     `;
-    const { rows } = await pool.query(query, [stock, id, vendorId]);
+    const { rows } = await pool.query(query, [stock, precio_personalizado, id, vendorId]);
     
     if (rows.length === 0) {
       return res.status(404).json({ error: 'Producto no encontrado en tu inventario.' });
     }
 
     res.json({
-      message: 'Stock actualizado exitosamente.',
+      message: 'Joya actualizada exitosamente.',
       producto: rows[0]
     });
   } catch (error) {
-    console.error("🔥 ERROR AL ACTUALIZAR STOCK:", error);
-    res.status(500).json({ error: 'Error al actualizar el stock del producto.' });
+    console.error("🔥 ERROR AL ACTUALIZAR INVENTARIO:", error);
+    res.status(500).json({ error: 'Error al actualizar los datos del producto.' });
+  }
+};
+
+// DELETE /vendor/inventory/:id
+// Elimina por completo una joya de la vitrina del vendedor
+export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
+  const vendorId = req.user?.user_id;
+  const { id } = req.params;
+
+  try {
+    const query = `
+      DELETE FROM inventario_vendedor
+      WHERE id = $1 AND vendedor_id = $2
+      RETURNING *;
+    `;
+    const { rows } = await pool.query(query, [id, vendorId]);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'El producto no existe en tu inventario.' });
+    }
+
+    res.json({
+      message: 'Joya eliminada de tu vitrina correctamente.'
+    });
+  } catch (error) {
+    console.error("🔥 ERROR AL ELIMINAR ITEM DEL INVENTARIO:", error);
+    res.status(500).json({ error: 'Error al eliminar el producto de tu inventario.' });
   }
 };
 // GET /store/:slug
