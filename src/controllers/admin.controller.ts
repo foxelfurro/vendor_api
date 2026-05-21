@@ -52,13 +52,15 @@ export const createCatalogItem = async (req: Request, res: Response) => {
     const { sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id } = req.body;
 
     try {
+        // estado = true: las joyas creadas por un administrador nacen aprobadas
+        // y visibles de inmediato en el catálogo maestro.
         const query = `
-            INSERT INTO catalogo_maestro 
-            (sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO catalogo_maestro
+            (sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id, estado)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, true)
             RETURNING *;
         `;
-        
+
         const values = [sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id];
         const result = await pool.query(query, values);
 
@@ -92,6 +94,139 @@ export const getCategorias = async (_req: Request, res: Response): Promise<any> 
     } catch (error) {
         console.error("Error al obtener categorías:", error);
         return res.status(500).json({ message: "Error al obtener las categorías" });
+    }
+};
+
+// GET /admin/catalogo/pendientes
+// Lista las joyas propias pendientes de aprobación (estado = false)
+export const getPendingItems = async (_req: Request, res: Response): Promise<any> => {
+    try {
+        const query = `
+            SELECT
+                cm.id, cm.sku, cm.nombre, cm.descripcion, cm.ruta_imagen,
+                cm.precio_sugerido, cm.categoria_id, cm.marca_id, cm.estado, cm.creado_por,
+                u.nombre AS creador_nombre,
+                u.email  AS creador_email,
+                c.nombre AS categoria
+            FROM catalogo_maestro cm
+            LEFT JOIN usuarios u ON cm.creado_por = u.id
+            LEFT JOIN categorias c ON cm.categoria_id = c.id
+            WHERE cm.estado = false
+            ORDER BY cm.nombre ASC;
+        `;
+        const result = await pool.query(query);
+        return res.status(200).json(result.rows);
+    } catch (error) {
+        console.error("Error al obtener joyas pendientes:", error);
+        return res.status(500).json({ message: "Error al obtener las joyas pendientes" });
+    }
+};
+
+// PUT /admin/catalogo/:id
+// Permite al administrador modificar una joya (incluida la asignación de categoría)
+export const updateCatalogItem = async (req: Request, res: Response): Promise<any> => {
+    const { id } = req.params;
+    const { sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id } = req.body;
+
+    try {
+        // categoria_id se asigna directamente (puede pasar de NULL a un valor real).
+        // El resto de campos se conservan si llegan vacíos (COALESCE).
+        const query = `
+            UPDATE catalogo_maestro
+            SET sku             = COALESCE($1, sku),
+                nombre          = COALESCE($2, nombre),
+                descripcion     = COALESCE($3, descripcion),
+                precio_sugerido = COALESCE($4, precio_sugerido),
+                ruta_imagen     = COALESCE($5, ruta_imagen),
+                categoria_id    = $6,
+                marca_id        = COALESCE($7, marca_id)
+            WHERE id = $8
+            RETURNING *;
+        `;
+        const values = [
+            sku ?? null, nombre ?? null, descripcion ?? null, precio_sugerido ?? null,
+            ruta_imagen ?? null, categoria_id ?? null, marca_id ?? null, id
+        ];
+        const result = await pool.query(query, values);
+
+        if (result.rowCount === 0) {
+            return res.status(404).json({ message: "Joya no encontrada" });
+        }
+        return res.status(200).json({ message: "Joya actualizada correctamente", joya: result.rows[0] });
+    } catch (error: any) {
+        if (error.code === '23505') {
+            return res.status(400).json({ message: "Ya existe una joya con ese SKU" });
+        }
+        if (error.code === '23503') {
+            return res.status(400).json({ message: "La categoría o la marca seleccionada no existe" });
+        }
+        console.error("Error al actualizar joya:", error);
+        return res.status(500).json({ message: "Error al actualizar la joya" });
+    }
+};
+
+// POST /admin/catalogo/:id/aprobar
+// Aprueba una joya pendiente (estado = true). Exige que tenga categoría asignada.
+export const approveCatalogItem = async (req: Request, res: Response): Promise<any> => {
+    const { id } = req.params;
+
+    try {
+        const check = await pool.query(
+            `SELECT categoria_id, estado FROM catalogo_maestro WHERE id = $1;`,
+            [id]
+        );
+        if (check.rowCount === 0) {
+            return res.status(404).json({ message: "Joya no encontrada" });
+        }
+        if (check.rows[0].categoria_id === null) {
+            return res.status(400).json({ message: "Asigna una categoría a la joya antes de aprobarla" });
+        }
+
+        const result = await pool.query(
+            `UPDATE catalogo_maestro SET estado = true WHERE id = $1 RETURNING id, nombre;`,
+            [id]
+        );
+        return res.status(200).json({
+            message: "Joya aprobada y publicada en el catálogo maestro",
+            joya: result.rows[0]
+        });
+    } catch (error) {
+        console.error("Error al aprobar joya:", error);
+        return res.status(500).json({ message: "Error al aprobar la joya" });
+    }
+};
+
+// DELETE /admin/catalogo/:id
+// Rechaza una joya pendiente: la elimina del catálogo y de los inventarios que
+// la referencian. Solo opera sobre joyas con estado = false.
+export const rejectCatalogItem = async (req: Request, res: Response): Promise<any> => {
+    const { id } = req.params;
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const check = await client.query(
+            `SELECT id FROM catalogo_maestro WHERE id = $1 AND estado = false;`,
+            [id]
+        );
+        if (check.rowCount === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ message: "Joya pendiente no encontrada" });
+        }
+
+        // Primero las referencias de inventario, luego la joya (respeta la FK).
+        await client.query(`DELETE FROM inventario_vendedor WHERE producto_maestro_id = $1;`, [id]);
+        await client.query(`DELETE FROM catalogo_maestro WHERE id = $1;`, [id]);
+
+        await client.query('COMMIT');
+        return res.status(200).json({ message: "Joya rechazada y eliminada" });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error("Error al rechazar joya:", error);
+        return res.status(500).json({ message: "Error al rechazar la joya" });
+    } finally {
+        client.release();
     }
 };
 

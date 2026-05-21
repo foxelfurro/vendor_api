@@ -29,6 +29,7 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
         ON cm.id = iv.producto_maestro_id AND iv.vendedor_id = $1
       LEFT JOIN categorias c ON cm.categoria_id = c.id
       WHERE cm.marca_id = $2
+        AND cm.estado = true
         AND iv.producto_maestro_id IS NULL;
     `;
     const { rows } = await pool.query(query, [vendorId, marcaId]);
@@ -46,19 +47,22 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
 
   try {
     const query = `
-      SELECT 
+      SELECT
         iv.id AS inventario_id,
         iv.stock,
         iv.precio_personalizado,
         iv.producto_maestro_id,
-        COALESCE(cm.sku, iv.sku_custom) AS sku,
-        COALESCE(cm.nombre, iv.nombre_custom) AS nombre,
+        cm.sku AS sku,
+        cm.nombre AS nombre,
+        cm.descripcion AS descripcion,
         COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
-        COALESCE(cm.ruta_imagen, iv.imagen_custom) AS ruta_imagen,
+        cm.ruta_imagen AS ruta_imagen,
+        cm.categoria_id,
         c.nombre AS categoria,
-        CASE WHEN iv.producto_maestro_id IS NULL THEN true ELSE false END AS es_custom
+        cm.estado,
+        CASE WHEN cm.creado_por = $1 THEN true ELSE false END AS es_custom
       FROM inventario_vendedor iv
-      LEFT JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
+      JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
       LEFT JOIN categorias c ON cm.categoria_id = c.id
       WHERE iv.vendedor_id = $1;
     `;
@@ -141,27 +145,52 @@ export const updateInventoryItem = async (req: AuthRequest, res: Response) => {
 };
 
 // DELETE /vendor/inventory/:id
-// Elimina por completo una joya de la vitrina privada del vendedor
+// Elimina una joya de la vitrina privada del vendedor.
+// Si la joya era una "pieza propia" pendiente (estado = false) creada por este
+// mismo vendedor y nadie más la tiene, también se borra del catálogo maestro.
 export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const { id } = req.params;
 
+  const client = await pool.connect();
   try {
-    const query = `
-      DELETE FROM inventario_vendedor
-      WHERE id = $1 AND vendedor_id = $2
-      RETURNING *;
-    `;
-    const { rows } = await pool.query(query, [id, vendorId]);
+    await client.query('BEGIN');
 
-    if (rows.length === 0) {
+    const del = await client.query(
+      `DELETE FROM inventario_vendedor
+       WHERE id = $1 AND vendedor_id = $2
+       RETURNING producto_maestro_id;`,
+      [id, vendorId]
+    );
+
+    if (del.rowCount === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'El producto no existe en tu inventario.' });
     }
 
+    const productoMaestroId = del.rows[0].producto_maestro_id;
+
+    // Limpieza: si era una pieza propia pendiente del propio vendedor y ya
+    // nadie la referencia, se elimina del catálogo maestro para no dejar basura.
+    await client.query(
+      `DELETE FROM catalogo_maestro cm
+       WHERE cm.id = $1
+         AND cm.estado = false
+         AND cm.creado_por = $2
+         AND NOT EXISTS (
+           SELECT 1 FROM inventario_vendedor iv WHERE iv.producto_maestro_id = cm.id
+         );`,
+      [productoMaestroId, vendorId]
+    );
+
+    await client.query('COMMIT');
     res.json({ message: 'Joya eliminada de tu vitrina correctamente.' });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error("🔥 ERROR AL ELIMINAR ITEM DEL INVENTARIO:", error);
     res.status(500).json({ error: 'Error al eliminar el producto de tu inventario.' });
+  } finally {
+    client.release();
   }
 };
 // GET /store/:slug
@@ -180,17 +209,20 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
     const vendor = userResult.rows[0];
 
     const inventoryQuery = `
-      SELECT 
+      SELECT
         iv.id AS inventario_id,
         iv.stock,
         iv.precio_personalizado,
-        COALESCE(cm.id, NULL) AS producto_maestro_id,
-        COALESCE(cm.nombre, iv.nombre_custom) AS nombre,
+        cm.id AS producto_maestro_id,
+        cm.nombre AS nombre,
         COALESCE(cm.descripcion, 'Pieza exclusiva de nuestra colección independiente.') AS descripcion,
-        COALESCE(cm.ruta_imagen, iv.imagen_custom) AS ruta_imagen,
-        COALESCE(cm.precio_sugerido, 0) AS precio_sugerido
+        cm.ruta_imagen AS ruta_imagen,
+        COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
+        cm.categoria_id,
+        c.nombre AS categoria
       FROM inventario_vendedor iv
-      LEFT JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
+      JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
+      LEFT JOIN categorias c ON cm.categoria_id = c.id
       WHERE iv.vendedor_id = $1 AND iv.stock > 0;
     `;
     const inventoryResult = await pool.query(inventoryQuery, [vendor.id]);
@@ -249,53 +281,77 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
 };
 
 // POST /vendor/inventory/custom
-// Registra una joya propia con FOTO (Base64) y despacha notificación silenciosa
+// Registra una joya propia. La pieza se crea en el catálogo maestro con
+// estado = false (pendiente de aprobación) y queda vinculada al inventario del
+// vendedor, de modo que aparece de inmediato en su inventario y en su tienda,
+// pero NO en el catálogo maestro del resto hasta que un administrador la apruebe.
 export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
-  const vendorEmail = req.user?.email || 'Vendedor Anónimo'; 
+  const marcaId = req.user?.marca_id;
+  const vendorEmail = req.user?.email || 'Vendedor Anónimo';
   const { nombre, sku, stock, precio_personalizado, imagen_custom } = req.body;
 
   if (!nombre || !sku || stock === undefined || precio_personalizado === undefined) {
     return res.status(400).json({ error: 'Faltan datos para crear tu joya personalizada.' });
   }
 
+  const client = await pool.connect();
   try {
-    const query = `
-      INSERT INTO inventario_vendedor 
-        (vendedor_id, producto_maestro_id, nombre_custom, sku_custom, stock, precio_personalizado, imagen_custom)
-      VALUES 
-        ($1, NULL, $2, $3, $4, $5, $6)
-      RETURNING *;
-    `;
-    
-    const values = [vendorId, nombre, sku, stock, precio_personalizado, imagen_custom || null];
-    const { rows } = await pool.query(query, values);
-    
-    // Notificación en segundo plano (Reemplaza onboarding@resend.dev y el destino cuando verifiques tu dominio)
+    await client.query('BEGIN');
+
+    // 1. Se crea la joya en el catálogo maestro como pendiente (estado = false).
+    //    La categoría queda en NULL: la asignará el administrador al aprobarla.
+    const joya = await client.query(
+      `INSERT INTO catalogo_maestro
+         (sku, nombre, ruta_imagen, precio_sugerido, categoria_id, marca_id, estado, creado_por)
+       VALUES ($1, $2, $3, $4, NULL, $5, false, $6)
+       RETURNING id;`,
+      [sku, nombre, imagen_custom || null, precio_personalizado, marcaId, vendorId]
+    );
+    const productoMaestroId = joya.rows[0].id;
+
+    // 2. Se vincula a su inventario personal.
+    const inv = await client.query(
+      `INSERT INTO inventario_vendedor
+         (vendedor_id, producto_maestro_id, stock, precio_personalizado)
+       VALUES ($1, $2, $3, $4)
+       RETURNING *;`,
+      [vendorId, productoMaestroId, stock, precio_personalizado]
+    );
+
+    await client.query('COMMIT');
+
+    // Notificación en segundo plano para que el administrador revise la pieza.
     resend.emails.send({
-      from: 'Notificaciones Qlatte <onboarding@resend.dev>', 
-      to: 'admin@qlatte.com', 
-      subject: `💎 Nueva Pieza Propia Creada: ${nombre}`,
+      from: 'Notificaciones Qlatte <onboarding@resend.dev>',
+      to: 'admin@qlatte.com',
+      subject: `💎 Nueva Joya Propia pendiente de aprobación: ${nombre}`,
       html: `
-        <h2>Un vendedor ha registrado una pieza fuera del catálogo maestro</h2>
-        <p>Estudio de mercado pasivo en tiempo real para Lumin:</p>
+        <h2>Una vendedora registró una joya propia</h2>
+        <p>Está pendiente de revisión y aprobación en el panel de administración:</p>
         <ul>
-          <li><strong>Vendedor:</strong> ${vendorEmail}</li>
+          <li><strong>Vendedora:</strong> ${vendorEmail}</li>
           <li><strong>Nombre de la pieza:</strong> ${nombre}</li>
           <li><strong>SKU asignado:</strong> ${sku}</li>
           <li><strong>Precio fijado:</strong> $${precio_personalizado}</li>
-          <li><strong>¿Subió fotografía?:</strong> ${imagen_custom ? 'Sí (Almacenada localmente)' : 'No'}</li>
+          <li><strong>¿Subió fotografía?:</strong> ${imagen_custom ? 'Sí' : 'No'}</li>
         </ul>
       `
     }).catch(err => console.error("Error silencioso de Resend:", err));
 
     res.status(201).json({
-      message: '¡Joya personalizada agregada a tu inventario!',
-      producto: rows[0] 
+      message: '¡Joya propia creada! Ya aparece en tu inventario y tu tienda. Un administrador la revisará para publicarla en el catálogo maestro.',
+      producto: inv.rows[0]
     });
 
   } catch (error: any) {
+    await client.query('ROLLBACK');
+    if (error.code === '23505') {
+      return res.status(409).json({ error: 'Ya existe una joya con ese SKU. Usa un código diferente.' });
+    }
     console.error("🔥 ERROR AL AGREGAR JOYA CUSTOM:", error);
     res.status(500).json({ error: 'Hubo un error al guardar tu joya personalizada.' });
+  } finally {
+    client.release();
   }
 };

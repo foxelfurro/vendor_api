@@ -10,7 +10,7 @@ import { getSalesHistory, registerSale } from './controllers/sales.controller';
 import { exploreCatalog, getInventory, addToInventory, updateInventoryItem, deleteInventoryItem, getSellerCatalogBySlug, updateStoreSettings, addCustomToInventory } from './controllers/vendor.controller';
 
 import { getDashboardStats } from './controllers/dashboard.controller';
-import { createUser, createCatalogItem, getCategorias } from './controllers/admin.controller';
+import { createUser, createCatalogItem, getCategorias, getPendingItems, updateCatalogItem, approveCatalogItem, rejectCatalogItem } from './controllers/admin.controller';
 
 
 const app = express();
@@ -43,6 +43,12 @@ app.get('/store/:slug', getSellerCatalogBySlug);
 app.post('/admin/users', verifyToken, isAdmin, createUser);
 app.post('/admin/catalogo', verifyToken, isAdmin, createCatalogItem);
 app.get('/admin/categorias', verifyToken, isAdmin, getCategorias);
+
+// Aprobación de joyas propias creadas por vendedoras
+app.get('/admin/catalogo/pendientes', verifyToken, isAdmin, getPendingItems);
+app.put('/admin/catalogo/:id', verifyToken, isAdmin, updateCatalogItem);
+app.post('/admin/catalogo/:id/aprobar', verifyToken, isAdmin, approveCatalogItem);
+app.delete('/admin/catalogo/:id', verifyToken, isAdmin, rejectCatalogItem);
 
 // Operaciones de Vendedor
 app.get('/vendor/explore', verifyToken, exploreCatalog);
