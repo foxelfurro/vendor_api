@@ -136,6 +136,7 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response): Pr
   try {
     await client.query('BEGIN');
 
+    // PASO 1: Validar que el correo no exista
     const userCheck = await client.query('SELECT id FROM usuarios WHERE email = $1', [email]);
     if ((userCheck.rowCount ?? 0) > 0) {
       throw new Error('Este correo ya está registrado.');
@@ -145,8 +146,38 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response): Pr
       ? nombre.trim()
       : `${nombre.trim()} Joyeria`;
 
-    // ✅ FIX #2: Precio corregido a 29900 centavos ($299 MXN), igual que la renovación
-    // ✅ FIX #5: Se usa el teléfono real del usuario en lugar del hardcodeado
+    const saltRounds = 10;
+    const hashedPassword = await bcrypt.hash(password, saltRounds);
+
+    // ✅ FIX CONDICIÓN DE CARRERA — PASO 2: Primero insertamos en BD (con activo = false)
+    // Si Conekta falla después, el ROLLBACK limpia esto sin haber cobrado nada
+    const insertUserQuery = `
+      INSERT INTO usuarios (
+        id, nombre, email, password_hash, marca_id,
+        suscripcion_inicio, suscripcion_fin, suscripcion_estado, activo
+      )
+      VALUES (
+        gen_random_uuid(), $1, $2, $3, $4,
+        NOW(), NOW() + INTERVAL '1 month', 'pendiente', false
+      )
+      RETURNING id;
+    `;
+
+    const newUserResult = await client.query(insertUserQuery, [
+      nombre,
+      email,
+      hashedPassword,
+      marca_id ?? 1,
+    ]);
+    const newUserId = newUserResult.rows[0].id;
+
+    await client.query(
+      `INSERT INTO usuario_roles (usuario_id, rol_id) VALUES ($1, $2)`,
+      [newUserId, 2]
+    );
+
+    // ✅ FIX CONDICIÓN DE CARRERA — PASO 3: Ahora sí cobramos con Conekta
+    // Si falla aquí, el ROLLBACK borra al usuario de BD. Nadie pagó sin tener cuenta.
     const orden: any = await new Promise((resolve, reject) => {
       conekta.Order.create(
         {
@@ -159,51 +190,24 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response): Pr
           line_items: [
             {
               name: 'Licencia Vendor Hub',
-              unit_price: 1000, // ✅ FIX #2: Era 1000 (solo $10 MXN), corregido a $299 MXN
+              unit_price: 29900,
               quantity: 1,
             },
           ],
           charges: [{ payment_method: { type: 'card', token_id: token_id } }],
         },
-        function (err: any, res: any) {
-          if (err) {
-            reject(err);
-          } else {
-            resolve(res);
-          }
+        function (err: any, result: any) {
+          if (err) reject(err);
+          else resolve(result);
         }
       );
     });
 
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    // ✅ FIX #3: marca_id ya no está hardcodeado a 1, viene del body
-    const insertUserQuery = `
-      INSERT INTO usuarios (
-        id, nombre, email, password_hash, marca_id,
-        suscripcion_inicio, suscripcion_fin, suscripcion_estado, activo
-      )
-      VALUES (
-        gen_random_uuid(), $1, $2, $3, $4,
-        NOW(), NOW() + INTERVAL '1 month', 'activa', true
-      )
-      RETURNING id;
-    `;
-
-    const newUserResult = await client.query(insertUserQuery, [
-      nombre,
-      email,
-      hashedPassword,
-      marca_id ?? 1, // Si no se envía, cae al default 1 (comportamiento explícito)
-    ]);
-    const newUserId = newUserResult.rows[0].id;
-
-    const insertRoleQuery = `
-      INSERT INTO usuario_roles (usuario_id, rol_id)
-      VALUES ($1, $2);
-    `;
-    await client.query(insertRoleQuery, [newUserId, 2]);
+    // ✅ FIX CONDICIÓN DE CARRERA — PASO 4: Cobro exitoso → activamos la cuenta
+    await client.query(
+      `UPDATE usuarios SET activo = true, suscripcion_estado = 'activa' WHERE id = $1`,
+      [newUserId]
+    );
 
     await client.query('COMMIT');
 
