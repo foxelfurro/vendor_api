@@ -3,7 +3,7 @@ import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { Resend } from 'resend'; 
 
-// Inicializamos Resend (pon tu API key real en tu archivo .env)
+// Inicializamos Resend (asegúrate de tener tu RESEND_API_KEY en el .env)
 const resend = new Resend(process.env.RESEND_API_KEY || 're_tu_api_key_aqui');
 
 // GET /vendor/explore
@@ -29,6 +29,7 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
 };
 
 // GET /vendor/inventory
+// Carga el inventario híbrido usando COALESCE para fusionar maestro e independiente
 export const getInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
 
@@ -43,7 +44,6 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
         COALESCE(cm.nombre, iv.nombre_custom) AS nombre,
         COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
         COALESCE(cm.ruta_imagen, iv.imagen_custom) AS ruta_imagen,
-        -- Bandera útil para el frontend:
         CASE WHEN iv.producto_maestro_id IS NULL THEN true ELSE false END AS es_custom
       FROM inventario_vendedor iv
       LEFT JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
@@ -58,7 +58,7 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
 };
 
 // POST /vendor/inventory
-// Vincula un producto del catálogo maestro al inventario personal del vendedor
+// Vincula una joya del catálogo maestro al inventario del vendedor
 export const addToInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const { producto_maestro_id, stock, precio_personalizado } = req.body;
@@ -95,14 +95,14 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
   }
 };
 
-// Actualiza la cantidad de stock y/o el precio personalizado de un producto en el inventario
+// PUT /vendor/inventory/:id
+// Actualiza dinámicamente precio_personalizado, stock o ambos
 export const updateInventoryItem = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
-  const { id } = req.params; // Este es el inventario_id
+  const { id } = req.params; 
   const { stock, precio_personalizado } = req.body;
 
   try {
-    // Usamos COALESCE para que si uno de los dos campos no viene en el body, conserve su valor actual
     const query = `
       UPDATE inventario_vendedor
       SET 
@@ -128,7 +128,7 @@ export const updateInventoryItem = async (req: AuthRequest, res: Response) => {
 };
 
 // DELETE /vendor/inventory/:id
-// Elimina por completo una joya de la vitrina del vendedor
+// Elimina por completo una joya de la vitrina privada del vendedor
 export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const { id } = req.params;
@@ -136,7 +136,7 @@ export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
   try {
     const query = `
       DELETE FROM inventario_vendedor
-      WHERE id = $1 AND vendedor_id = $2
+      WHERE id = $1 AND vendor_id = $2
       RETURNING *;
     `;
     const { rows } = await pool.query(query, [id, vendorId]);
@@ -145,21 +145,20 @@ export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'El producto no existe en tu inventario.' });
     }
 
-    res.json({
-      message: 'Joya eliminada de tu vitrina correctamente.'
-    });
+    res.json({ message: 'Joya eliminada de tu vitrina correctamente.' });
   } catch (error) {
     console.error("🔥 ERROR AL ELIMINAR ITEM DEL INVENTARIO:", error);
     res.status(500).json({ error: 'Error al eliminar el producto de tu inventario.' });
   }
 };
+
 // GET /store/:slug
-// Endpoint PÚBLICO para ver el catálogo de una vendedora específica
+// Endpoint PÚBLICO para ver la tienda de una vendedora específica
 export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
   const { slug } = req.params;
 
   try {
-    const userQuery = `SELECT id, store_name, telefono FROM usuarios WHERE store_slug = $1`;
+    const userQuery = `SELECT id, nombre, telefono FROM usuarios WHERE store_slug = $1`;
     const userResult = await pool.query(userQuery, [slug]);
 
     if (userResult.rows.length === 0) {
@@ -173,25 +172,21 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
         iv.id AS inventario_id,
         iv.stock,
         iv.precio_personalizado,
-        cm.id AS producto_maestro_id,
-        cm.nombre,
-        cm.descripcion,
-        cm.ruta_imagen,
-        cm.precio_sugerido
+        COALESCE(cm.id, NULL) AS producto_maestro_id,
+        COALESCE(cm.nombre, iv.nombre_custom) AS nombre,
+        COALESCE(cm.descripcion, 'Pieza exclusiva de nuestra colección independiente.') AS descripcion,
+        COALESCE(cm.ruta_imagen, iv.imagen_custom) AS ruta_imagen,
+        COALESCE(cm.precio_sugerido, 0) AS precio_sugerido
       FROM inventario_vendedor iv
-      INNER JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
+      LEFT JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
       WHERE iv.vendedor_id = $1 AND iv.stock > 0;
     `;
     const inventoryResult = await pool.query(inventoryQuery, [vendor.id]);
 
-    // Quitamos el prefijo +52 antes de mandarlo al front para que encaje 
-    // perfectamente en tu componente con el span hardcodeado
-    const telefonoDigitos = vendor.telefono ? vendor.telefono.replace(/^\+52/, '') : '';
-
     res.json({
       vendor: {
-        nombre: vendor.store_name,
-        telefono: telefonoDigitos, // Envía solo los 10 dígitos (ej: 5512345678)
+        nombre: vendor.nombre,
+        telefono: vendor.telefono,
       },
       products: inventoryResult.rows
     });
@@ -205,119 +200,83 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
 // PUT /vendor/store-settings
 export const updateStoreSettings = async (req: AuthRequest, res: Response): Promise<any> => {
   const userId = req.user?.user_id;
+  const { store_slug, telefono } = req.body;
 
-console.log("👉 LO QUE LLEGA AL BACKEND (req.body):", req.body);
-
-  const { store_name, store_slug, telefono } = req.body;
-
-  if (!store_name || !store_slug || !telefono) {
-    return res.status(400).json({ error: 'El nombre de la tienda, el slug y el teléfono son obligatorios.' });
+  if (!store_slug || !telefono) {
+    return res.status(400).json({ error: 'El nombre de la tienda y el teléfono son obligatorios.' });
   }
 
   try {
-    // Limpiar slug: solo minúsculas, números, sin espacios ni caracteres especiales
-    const cleanSlug = store_slug
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, '')   // elimina todo lo que no sea letra, número o guión
-      .replace(/-+/g, '-')          // múltiples guiones a uno solo
-      .replace(/^-|-$/g, '');       // quita guiones al inicio o final
+    const cleanSlug = store_slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    const cleanPhone = telefono.replace(/\D/g, '');
 
-    if (!cleanSlug) {
-      return res.status(400).json({ error: 'El enlace generado no es válido.' });
-    }
-
-    // 1. Limpiar por si acaso el usuario metió un espacio o guion en el string de 10 dígitos
-    let cleanPhone = telefono.replace(/[^\d]/g, '');
-
-    // 2. Validar que vengan EXACTAMENTE 10 dígitos numéricos
-    if (!/^\d{10}$/.test(cleanPhone)) {
-      return res.status(400).json({ error: 'El teléfono debe tener exactamente 10 dígitos.' });
-    }
-
-    // 3. Le concatenamos el +52 para guardarlo estandarizado en la Base de Datos
-    const telefonoCompleto = `+52${cleanPhone}`; 
-
-    // Verificar unicidad del slug (excluyendo al usuario actual)
     const checkQuery = 'SELECT id FROM usuarios WHERE store_slug = $1 AND id != $2';
     const checkResult = await pool.query(checkQuery, [cleanSlug, userId]);
     
     if (checkResult.rows.length > 0) {
-      return res.status(400).json({ error: 'Este enlace de tienda ya está en uso. Por favor elige otro nombre.' });
+      return res.status(400).json({ error: 'Este nombre de tienda ya está en uso. Por favor elige otro.' });
     }
 
-    // CORRECCIÓN AQUÍ: Pasamos $3 como telefonoCompleto en lugar de cleanPhone
     const updateQuery = `
       UPDATE usuarios 
-      SET store_name = $1, store_slug = $2, telefono = $3
-      WHERE id = $4 
-      RETURNING store_name, store_slug, telefono;
+      SET store_slug = $1, telefono = $2 
+      WHERE id = $3 
+      RETURNING store_slug, telefono;
     `;
-    const { rows } = await pool.query(updateQuery, [store_name.trim(), cleanSlug, telefonoCompleto, userId]);
-
-    // Devolvemos el teléfono limpio de nuevo al front para actualizar el estado del formulario local
-    const dataResponse = {
-      ...rows[0],
-      telefono: rows[0].telefono.replace(/^\+52/, '')
-    };
+    const { rows } = await pool.query(updateQuery, [cleanSlug, cleanPhone, userId]);
 
     return res.json({ 
       message: '¡Configuración de tienda guardada exitosamente!', 
-      data: dataResponse 
+      data: rows[0] 
     });
 
   } catch (error) {
-    console.error("ERROR AL ACTUALIZAR TIENDA:", error);
+    console.error(" ERROR AL ACTUALIZAR TIENDA:", error);
     return res.status(500).json({ error: 'Error al actualizar la configuración de tu tienda.' });
   }
 };
 
 // POST /vendor/inventory/custom
-// Registra una joya propia del vendedor y ENVÍA NOTIFICACIÓN SILENCIOSA
+// Registra una joya propia con FOTO (Base64) y despacha notificación silenciosa
 export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const vendorEmail = req.user?.email || 'Vendedor Anónimo'; 
-  const { nombre, sku, stock, precio_personalizado } = req.body;
+  const { nombre, sku, stock, precio_personalizado, imagen_custom } = req.body;
 
   if (!nombre || !sku || stock === undefined || precio_personalizado === undefined) {
     return res.status(400).json({ error: 'Faltan datos para crear tu joya personalizada.' });
   }
 
   try {
-    // 1. Guardar la joya "custom" en la tabla pivote
     const query = `
       INSERT INTO inventario_vendedor 
-        (vendedor_id, producto_maestro_id, nombre_custom, sku_custom, stock, precio_personalizado)
+        (vendedor_id, producto_maestro_id, nombre_custom, sku_custom, stock, precio_personalizado, imagen_custom)
       VALUES 
-        ($1, NULL, $2, $3, $4, $5)
+        ($1, NULL, $2, $3, $4, $5, $6)
       RETURNING *;
     `;
     
-    const values = [vendorId, nombre, sku, stock, precio_personalizado];
+    const values = [vendorId, nombre, sku, stock, precio_personalizado, imagen_custom || null];
     const { rows } = await pool.query(query, values);
     
-    // 2. MAGIA SILENCIOSA: Notificar al administrador por correo en segundo plano (sin await)
-   resend.emails.send({
-      // EL FROM TIENE QUE SER EL DE RESEND (obligatorio hasta verificar el dominio)
+    // Notificación en segundo plano (Reemplaza onboarding@resend.dev y el destino cuando verifiques tu dominio)
+    resend.emails.send({
       from: 'Notificaciones Qlatte <onboarding@resend.dev>', 
-      
-      // EL TO DEBE SER TU CORREO DE CUENTA (el cual es admin@qlatte.com)
       to: 'admin@qlatte.com', 
-      
-      subject: `💎 Nueva Pieza Propia: ${nombre}`,
-  
+      subject: `💎 Nueva Pieza Propia Creada: ${nombre}`,
       html: `
         <h2>Un vendedor ha registrado una pieza fuera del catálogo maestro</h2>
-        <p>Esta información te sirve como estudio de mercado pasivo para futuras actualizaciones.</p>
+        <p>Estudio de mercado pasivo en tiempo real para Lumin:</p>
         <ul>
           <li><strong>Vendedor:</strong> ${vendorEmail}</li>
           <li><strong>Nombre de la pieza:</strong> ${nombre}</li>
           <li><strong>SKU asignado:</strong> ${sku}</li>
-          <li><strong>Precio de venta:</strong> $${precio_personalizado}</li>
+          <li><strong>Precio fijado:</strong> $${precio_personalizado}</li>
+          <li><strong>¿Subió fotografía?:</strong> ${imagen_custom ? 'Sí (Almacenada localmente)' : 'No'}</li>
         </ul>
       `
     }).catch(err => console.error("Error silencioso de Resend:", err));
 
-    // 3. Responder de inmediato al frontend
     res.status(201).json({
       message: '¡Joya personalizada agregada a tu inventario!',
       producto: rows[0] 
