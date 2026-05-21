@@ -131,6 +131,8 @@ export const updateCatalogItem = async (req: Request, res: Response): Promise<an
     try {
         // categoria_id se asigna directamente (puede pasar de NULL a un valor real).
         // El resto de campos se conservan si llegan vacíos (COALESCE).
+        // skus_anteriores: si el SKU cambia, el valor previo se archiva en el
+        // historial (y se quita del historial el SKU que ahora pasa a ser actual).
         const query = `
             UPDATE catalogo_maestro
             SET sku             = COALESCE($1, sku),
@@ -139,7 +141,12 @@ export const updateCatalogItem = async (req: Request, res: Response): Promise<an
                 precio_sugerido = COALESCE($4, precio_sugerido),
                 ruta_imagen     = COALESCE($5, ruta_imagen),
                 categoria_id    = $6,
-                marca_id        = COALESCE($7, marca_id)
+                marca_id        = COALESCE($7, marca_id),
+                skus_anteriores = CASE
+                    WHEN $1 IS NOT NULL AND sku IS NOT NULL AND $1 <> sku
+                        THEN array_remove(array_append(skus_anteriores, sku), $1)
+                    ELSE skus_anteriores
+                END
             WHERE id = $8
             RETURNING *;
         `;

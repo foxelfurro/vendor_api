@@ -17,6 +17,7 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
       SELECT
         cm.id,
         cm.sku,
+        cm.skus_anteriores,
         cm.nombre,
         cm.descripcion,
         cm.ruta_imagen,
@@ -53,6 +54,7 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
         iv.precio_personalizado,
         iv.producto_maestro_id,
         cm.sku AS sku,
+        cm.skus_anteriores,
         cm.nombre AS nombre,
         cm.descripcion AS descripcion,
         COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
