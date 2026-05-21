@@ -177,9 +177,20 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
-// 1. CREAMOS EL USUARIO 
-   subscribeAndCreateAccount
-    // Pasamos los 4 valores requeridos (el 1 es el marca_id por defecto)
+    // 1. CREAMOS EL USUARIO (Con su mes de suscripción y estado activo)
+    const insertUserQuery = `
+      INSERT INTO usuarios (
+        id, nombre, email, password_hash, marca_id, 
+        suscripcion_inicio, suscripcion_fin, suscripcion_estado, activo
+      )
+      VALUES (
+        gen_random_uuid(), $1, $2, $3, $4, 
+        NOW(), NOW() + INTERVAL '1 month', 'activa', true
+      )
+      RETURNING id;
+    `;
+    
+    // Ejecutamos la consulta y extraemos el ID generado
     const newUserResult = await client.query(insertUserQuery, [nombre, email, hashedPassword, 1]);
     const newUserId = newUserResult.rows[0].id;
 
@@ -208,7 +219,6 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response) => 
   } finally {
     client.release();
   }
-  
 };
 // --- RENOVAR SUSCRIPCIÓN (Para usuarios vencidos) ---
 export const renewSubscription = async (req: Request, res: Response): Promise<any> => {
