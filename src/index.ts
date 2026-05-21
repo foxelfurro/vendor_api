@@ -25,7 +25,9 @@ app.use(cors({
     credentials: true 
 }));
 
-app.use(express.json());
+// Aumentamos el límite para permitir que pasen las fotos en Base64
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // --- RUTAS PÚBLICAS (No requieren token) ---
 app.post('/auth/login', login);
