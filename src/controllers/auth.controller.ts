@@ -159,7 +159,7 @@ export const subscribeAndCreateAccount = async (req: Request, res: Response): Pr
           line_items: [
             {
               name: 'Licencia Vendor Hub',
-              unit_price: 29900, // ✅ FIX #2: Era 1000 (solo $10 MXN), corregido a $299 MXN
+              unit_price: 1000, // ✅ FIX #2: Era 1000 (solo $10 MXN), corregido a $299 MXN
               quantity: 1,
             },
           ],
