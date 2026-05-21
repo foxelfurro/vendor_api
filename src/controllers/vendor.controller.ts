@@ -136,7 +136,7 @@ export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
   try {
     const query = `
       DELETE FROM inventario_vendedor
-      WHERE id = $1 AND vendor_id = $2
+      WHERE id = $1 AND vendedor_id = $2
       RETURNING *;
     `;
     const { rows } = await pool.query(query, [id, vendorId]);
@@ -151,7 +151,6 @@ export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Error al eliminar el producto de tu inventario.' });
   }
 };
-
 // GET /store/:slug
 // Endpoint PÚBLICO para ver la tienda de una vendedora específica
 export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
