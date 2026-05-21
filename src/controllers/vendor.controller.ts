@@ -11,20 +11,26 @@ const resend = new Resend(process.env.RESEND_API_KEY || 're_tu_api_key_aqui');
 export const exploreCatalog = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const marcaId = req.user?.marca_id;
-    
+  const esAdmin = req.user?.rol === 1;
+
   try {
-    const query = `
-      SELECT
-        cm.id,
-        cm.sku,
-        cm.skus_anteriores,
-        cm.nombre,
-        cm.descripcion,
-        cm.ruta_imagen,
-        cm.precio_sugerido,
-        cm.marca_id,
-        cm.categoria_id,
-        c.nombre AS categoria
+    const columnas = `
+      cm.id, cm.sku, cm.skus_anteriores, cm.nombre, cm.descripcion,
+      cm.ruta_imagen, cm.precio_sugerido, cm.marca_id, cm.categoria_id,
+      c.nombre AS categoria
+    `;
+
+    // El administrador ve TODO el catálogo maestro aprobado (para gestionarlo).
+    // La vendedora ve solo las joyas aprobadas de su marca que aún no tiene.
+    const adminQuery = `
+      SELECT ${columnas}
+      FROM catalogo_maestro cm
+      LEFT JOIN categorias c ON cm.categoria_id = c.id
+      WHERE cm.estado = true
+      ORDER BY cm.nombre;
+    `;
+    const vendorQuery = `
+      SELECT ${columnas}
       FROM catalogo_maestro cm
       LEFT JOIN inventario_vendedor iv
         ON cm.id = iv.producto_maestro_id AND iv.vendedor_id = $1
@@ -33,7 +39,10 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
         AND cm.estado = true
         AND iv.producto_maestro_id IS NULL;
     `;
-    const { rows } = await pool.query(query, [vendorId, marcaId]);
+
+    const { rows } = esAdmin
+      ? await pool.query(adminQuery)
+      : await pool.query(vendorQuery, [vendorId, marcaId]);
     res.json(rows);
   } catch (error) {
     console.error("🔥 ERROR EN EXPLORE:", error);
@@ -201,7 +210,8 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
   const { slug } = req.params;
 
   try {
-    const userQuery = `SELECT id, nombre, telefono FROM usuarios WHERE store_slug = $1`;
+    // 1. AÑADIDO: 'store_name' a la consulta SQL
+    const userQuery = `SELECT id, nombre, store_name, telefono FROM usuarios WHERE store_slug = $1`;
     const userResult = await pool.query(userQuery, [slug]);
 
     if (userResult.rows.length === 0) {
@@ -232,6 +242,7 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
     res.json({
       vendor: {
         nombre: vendor.nombre,
+        store_name: vendor.store_name, // 2. AÑADIDO: Se envía al frontend
         telefono: vendor.telefono,
       },
       products: inventoryResult.rows
