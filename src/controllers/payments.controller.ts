@@ -25,6 +25,17 @@ const PRECIO_CENTAVOS = Number(process.env.CONEKTA_PRECIO_CENTAVOS) || 29900; //
 const PLAN_ID = process.env.CONEKTA_PLAN_ID || 'lumin-suscripcion-mensual';
 const FRONTEND_URL = (process.env.FRONTEND_URL || 'https://lumin.qlatte.com').replace(/\/$/, '');
 
+// Métodos de pago para los pagos ÚNICOS (no recurrentes), separados por coma.
+// IMPORTANTE: incluir SOLO los que estén habilitados en la cuenta de Conekta.
+// Pedir un método no habilitado hace que Conekta rechace la orden completa
+// ("merchant does not accept this payment method"). Por eso el valor por defecto
+// es solo 'card'; cuando OXXO (cash) y SPEI (bank_transfer) estén activos en el
+// panel de Conekta, se cambia la variable a 'card,cash,bank_transfer'.
+const METODOS_UNICO = (process.env.CONEKTA_METODOS || 'card')
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean);
+
 // =============================================================================
 // Helpers
 // =============================================================================
@@ -124,7 +135,7 @@ export const crearCheckout = async (req: Request, res: Response): Promise<any> =
 
     const checkout: any = {
       type: 'HostedPayment',
-      allowed_payment_methods: recurrente ? ['card'] : ['card', 'cash', 'bank_transfer'],
+      allowed_payment_methods: recurrente ? ['card'] : METODOS_UNICO,
       success_url: `${FRONTEND_URL}/pago/resultado?ref=${pagoId}`,
       failure_url: `${FRONTEND_URL}/pago/resultado?ref=${pagoId}`,
       expires_at: Math.floor(Date.now() / 1000) + 24 * 60 * 60, // expira en 24 h
