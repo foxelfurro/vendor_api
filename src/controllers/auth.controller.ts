@@ -11,18 +11,39 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 // Los pagos ya NO se procesan aquí: se manejan en payments.controller.ts
 // mediante el Checkout alojado de Conekta.
 
-// --- FUNCIÓN DE AYUDA PARA VALIDAR CAPTCHA ---
+// --- FUNCIÓN DE AYUDA PARA VALIDAR CAPTCHA (Cloudflare Turnstile) ---
 const verifyCaptcha = async (token: string): Promise<boolean> => {
   if (!token) return false;
+
+  const secret = process.env.TURNSTILE_SECRET_KEY;
+  if (!secret) {
+    console.error('Falta la variable de entorno TURNSTILE_SECRET_KEY.');
+    return false;
+  }
+
   try {
     const verifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
+    // URLSearchParams codifica correctamente el cuerpo (evita romper la petición
+    // si el token trae caracteres especiales).
+    const params = new URLSearchParams();
+    params.append('secret', secret);
+    params.append('response', token);
+
     const response = await fetch(verifyUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `secret=${process.env.TURNSTILE_SECRET_KEY}&response=${token}`,
+      body: params,
     });
-    const data = await response.json();
-    return data.success === true;
+    const data: any = await response.json();
+
+    if (data?.success !== true) {
+      // Cloudflare devuelve el motivo en "error-codes" (ej. invalid-input-secret,
+      // timeout-or-duplicate). Registrarlo facilita el diagnóstico.
+      console.error('Verificación de CAPTCHA fallida. error-codes:', data?.['error-codes']);
+      return false;
+    }
+    return true;
   } catch (err) {
     console.error('Error validando Captcha:', err);
     return false;
