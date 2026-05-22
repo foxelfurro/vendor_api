@@ -215,13 +215,41 @@ export const webhookConekta = async (req: Request, res: Response): Promise<any> 
   const objeto: any = evento?.data?.object || {};
   console.log(`📨 Webhook Conekta recibido: ${tipo || '(sin tipo)'}`);
 
-  // Para eventos de fallo se vuelca el detalle completo del payload: así queda
-  // visible el failure_code / failure_message / debug_message exacto de Conekta.
+  // Para eventos de fallo se vuelca el detalle completo del payload, y si el
+  // fallo es de una suscripción, se consulta la orden del ciclo para ver el
+  // failure_code / failure_message EXACTO del cargo rechazado.
   if (/failed|declined|canceled|expired|fraud/.test(tipo)) {
     try {
       console.log('   ⚠️  Detalle del evento de fallo:', JSON.stringify(objeto, null, 2));
     } catch {
       console.log('   ⚠️  Detalle del evento de fallo: no se pudo serializar.');
+    }
+
+    const ordenIdFallo: string | undefined =
+      objeto?.last_billing_cycle_order_id ||
+      (objeto?.object === 'order' ? objeto?.id : undefined);
+
+    if (ordenIdFallo) {
+      try {
+        const ordenFallo: any = await conektaRequest('GET', `/orders/${ordenIdFallo}`);
+        const cargo = ordenFallo?.charges?.data?.[0];
+        console.log(
+          `   ⚠️  Cargo de la orden ${ordenIdFallo}:`,
+          JSON.stringify(
+            {
+              order_payment_status: ordenFallo?.payment_status,
+              charge_status: cargo?.status,
+              failure_code: cargo?.failure_code,
+              failure_message: cargo?.failure_message,
+              payment_method: cargo?.payment_method?.type,
+            },
+            null,
+            2
+          )
+        );
+      } catch (e: any) {
+        console.log(`   ⚠️  No se pudo consultar la orden ${ordenIdFallo}:`, e?.message || e);
+      }
     }
   }
 
