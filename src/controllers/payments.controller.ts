@@ -215,6 +215,16 @@ export const webhookConekta = async (req: Request, res: Response): Promise<any> 
   const objeto: any = evento?.data?.object || {};
   console.log(`📨 Webhook Conekta recibido: ${tipo || '(sin tipo)'}`);
 
+  // Para eventos de fallo se vuelca el detalle completo del payload: así queda
+  // visible el failure_code / failure_message / debug_message exacto de Conekta.
+  if (/failed|declined|canceled|expired|fraud/.test(tipo)) {
+    try {
+      console.log('   ⚠️  Detalle del evento de fallo:', JSON.stringify(objeto, null, 2));
+    } catch {
+      console.log('   ⚠️  Detalle del evento de fallo: no se pudo serializar.');
+    }
+  }
+
   try {
     if (tipo === 'order.paid') {
       await procesarOrdenPagada(objeto);
