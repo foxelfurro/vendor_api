@@ -3,7 +3,8 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser'; 
 
 import { verifyToken, isAdmin } from './middlewares/auth.middleware';
-import { login, logout, getMe, subscribeAndCreateAccount, forgotPassword, resetPassword, renewSubscription} from './controllers/auth.controller';
+import { login, logout, getMe, registerAccount, forgotPassword, resetPassword } from './controllers/auth.controller';
+import { crearCheckout, estadoPago, webhookConekta } from './controllers/payments.controller';
 import { getSalesHistory, registerSale } from './controllers/sales.controller';
 
 // 1. IMPORTACIONES DEL VENDEDOR: Quitamos requestCatalogItem y agregamos addCustomToInventory
@@ -31,11 +32,18 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // --- RUTAS PÚBLICAS (No requieren token) ---
 app.post('/auth/login', login);
-app.post('/auth/logout', logout); 
+app.post('/auth/logout', logout);
 app.post('/auth/forgot-password', forgotPassword);
 app.post('/auth/reset-password', resetPassword);
-app.post('/auth/subscribe', subscribeAndCreateAccount); 
+app.post('/auth/register', registerAccount);
 app.get('/store/:slug', getSellerCatalogBySlug);
+
+// --- PAGOS (Conekta) ---
+// Públicas: se identifican con correo + contraseña dentro del propio controlador.
+app.post('/payments/checkout', crearCheckout);
+app.get('/payments/estado/:pagoId', estadoPago);
+// Webhook de Conekta. El secreto va en la URL configurada en el panel de Conekta.
+app.post('/webhooks/conekta/:secret', webhookConekta);
 
 // --- RUTAS PROTEGIDAS (Requieren verifyToken) ---
 
@@ -71,9 +79,6 @@ app.get('/sales/history', verifyToken, getSalesHistory);
 
 // Perfil y Autenticación
 app.get('/auth/me', verifyToken, getMe);
-
-// RUTA DE RENOVACIÓN 
-app.post('/auth/renew', renewSubscription);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Servidor SaaS corriendo en puerto ${PORT}`));

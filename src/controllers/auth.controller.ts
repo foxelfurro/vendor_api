@@ -8,9 +8,8 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const conekta = require('conekta');
-conekta.api_key = process.env.CONEKTA_PRIVATE_KEY;
-conekta.locale = 'es';
+// Los pagos ya NO se procesan aquí: se manejan en payments.controller.ts
+// mediante el Checkout alojado de Conekta.
 
 // --- FUNCIÓN DE AYUDA PARA VALIDAR CAPTCHA ---
 const verifyCaptcha = async (token: string): Promise<boolean> => {
@@ -45,10 +44,11 @@ export const login = async (req: Request, res: Response): Promise<any> => {
     }
 
     const query = `
-      SELECT u.id, u.marca_id, u.password_hash, u.suscripcion_fin, ur.rol_id AS rol
+      SELECT u.id, u.marca_id, u.password_hash, u.suscripcion_fin, u.suscripcion_estado,
+             u.activo, ur.rol_id AS rol
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
-      WHERE u.email = $1 AND u.activo = true
+      WHERE LOWER(u.email) = LOWER($1)
     `;
     const { rows } = await pool.query(query, [email]);
 
@@ -58,21 +58,30 @@ export const login = async (req: Request, res: Response): Promise<any> => {
 
     const user = rows[0];
 
-    if (user.suscripcion_fin) {
-      const ahora = new Date();
-      const fechaFin = new Date(user.suscripcion_fin);
-
-      if (fechaFin < ahora) {
-        return res.status(403).json({
-          error: 'Tu suscripción ha expirado. Por favor, renueva tu plan para acceder.',
-        });
-      }
-    }
-
+    // Se valida la contraseña antes de revelar cualquier estado de la cuenta.
     const validPassword = await bcrypt.compare(password, user.password_hash);
-
     if (!validPassword) {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
+    }
+
+    // Cuenta registrada pero sin suscripción pagada todavía.
+    if (!user.activo && user.suscripcion_estado === 'pendiente') {
+      return res.status(403).json({
+        error: 'Tu cuenta está registrada pero aún no tiene una suscripción activa. Completa tu pago para entrar.',
+        code: 'PENDING_SUBSCRIPTION',
+      });
+    }
+
+    if (!user.activo) {
+      return res.status(403).json({ error: 'Tu cuenta está desactivada. Contacta a soporte.' });
+    }
+
+    // Suscripción vencida.
+    if (user.suscripcion_fin && new Date(user.suscripcion_fin) < new Date()) {
+      return res.status(403).json({
+        error: 'Tu suscripción ha expirado. Renueva tu plan para acceder.',
+        code: 'EXPIRED_SUBSCRIPTION',
+      });
     }
 
     const token = jwt.sign(
@@ -122,176 +131,69 @@ export const getMe = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const subscribeAndCreateAccount = async (req: Request, res: Response): Promise<any> => {
-  // ✅ FIX #3: Se recibe 'telefono' y 'marca_id' desde el body en lugar de valores hardcodeados
-  const { token_id, nombre, email, password, captcha_token, telefono, marca_id } = req.body;
+// =============================================================================
+// REGISTRO DE CUENTA  (paso 1 de 2 — SIN cobro)
+// -----------------------------------------------------------------------------
+// Crea la cuenta INACTIVA (activo = false, suscripcion_estado = 'pendiente').
+// El cobro de la suscripción es un paso aparte (payments.controller.ts), de modo
+// que si el pago no se concreta la cuenta no se pierde: la persona puede iniciar
+// el pago después con su correo y contraseña.
+// =============================================================================
+export const registerAccount = async (req: Request, res: Response): Promise<any> => {
+  const { nombre, email, password, telefono, marca_id, captcha_token } = req.body;
 
-  const isHuman = await verifyCaptcha(captcha_token);
-  if (!isHuman) {
-    return res.status(403).json({ success: false, error: 'Verificación de seguridad fallida.' });
+  if (!nombre?.trim() || !email?.trim() || !password) {
+    return res.status(400).json({ error: 'Faltan datos obligatorios: nombre, correo y contraseña.' });
   }
-
-  const client = await pool.connect();
-
-  try {
-    await client.query('BEGIN');
-
-    // PASO 1: Validar que el correo no exista
-    const userCheck = await client.query('SELECT id FROM usuarios WHERE email = $1', [email]);
-    if ((userCheck.rowCount ?? 0) > 0) {
-      throw new Error('Este correo ya está registrado.');
-    }
-
-    const nombreValido = nombre.trim().includes(' ')
-      ? nombre.trim()
-      : `${nombre.trim()} Joyeria`;
-
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-
-    // ✅ FIX CONDICIÓN DE CARRERA — PASO 2: Primero insertamos en BD (con activo = false)
-    // Si Conekta falla después, el ROLLBACK limpia esto sin haber cobrado nada
-    const insertUserQuery = `
-      INSERT INTO usuarios (
-        id, nombre, email, password_hash, marca_id,
-        suscripcion_inicio, suscripcion_fin, suscripcion_estado, activo
-      )
-      VALUES (
-        gen_random_uuid(), $1, $2, $3, $4,
-        NOW(), NOW() + INTERVAL '1 month', 'pendiente', false
-      )
-      RETURNING id;
-    `;
-
-    const newUserResult = await client.query(insertUserQuery, [
-      nombre,
-      email,
-      hashedPassword,
-      marca_id ?? 1,
-    ]);
-    const newUserId = newUserResult.rows[0].id;
-
-    await client.query(
-      `INSERT INTO usuario_roles (usuario_id, rol_id) VALUES ($1, $2)`,
-      [newUserId, 2]
-    );
-
-    // ✅ FIX CONDICIÓN DE CARRERA — PASO 3: Ahora sí cobramos con Conekta
-    // Si falla aquí, el ROLLBACK borra al usuario de BD. Nadie pagó sin tener cuenta.
-    const orden: any = await new Promise((resolve, reject) => {
-      conekta.Order.create(
-        {
-          currency: 'MXN',
-          customer_info: {
-            name: nombreValido,
-            email: email,
-            phone: telefono || '+521000000000',
-          },
-          line_items: [
-            {
-              name: 'Licencia Vendor Hub',
-              unit_price: 2000,
-              quantity: 1,
-            },
-          ],
-          charges: [{ payment_method: { type: 'card', token_id: token_id } }],
-        },
-        function (err: any, result: any) {
-          if (err) reject(err);
-          else resolve(result);
-        }
-      );
-    });
-
-    // ✅ FIX CONDICIÓN DE CARRERA — PASO 4: Cobro exitoso → activamos la cuenta
-    await client.query(
-      `UPDATE usuarios SET activo = true, suscripcion_estado = 'activa' WHERE id = $1`,
-      [newUserId]
-    );
-
-    await client.query('COMMIT');
-
-    res.status(200).json({
-      success: true,
-      message: '¡Bienvenido a Vendor Hub! Tu cuenta ha sido creada.',
-      user_id: newUserId,
-      orden_id: orden.id,
-    });
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    console.error('ERROR DETALLADO:', error);
-    const msg = error.details?.[0]?.message || error.message || 'Error en el proceso';
-    res.status(400).json({ success: false, error: msg });
-  } finally {
-    client.release();
-  }
-};
-
-// --- RENOVAR SUSCRIPCIÓN ---
-export const renewSubscription = async (req: Request, res: Response): Promise<any> => {
-  const { email, password, token_id, captcha_token } = req.body;
 
   const isHuman = await verifyCaptcha(captcha_token);
   if (!isHuman) {
     return res.status(403).json({ error: 'Verificación de seguridad fallida.' });
   }
 
-  const client = await pool.connect();
+  const correo = email.trim().toLowerCase();
 
   try {
-    await client.query('BEGIN');
+    const existe = await pool.query('SELECT id FROM usuarios WHERE LOWER(email) = $1', [correo]);
+    if ((existe.rowCount ?? 0) > 0) {
+      return res.status(409).json({
+        error: 'Este correo ya está registrado. Inicia sesión o, si te falta pagar, completa tu suscripción.',
+      });
+    }
 
-    // ✅ FIX #5: También traemos el teléfono real del usuario para Conekta
-    const userQuery = 'SELECT id, nombre, password_hash, telefono FROM usuarios WHERE email = $1';
-    const { rows } = await client.query(userQuery, [email]);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    if (rows.length === 0)
-      return res.status(404).json({ error: 'No existe una cuenta con este correo.' });
-
-    const user = rows[0];
-    const validPassword = await bcrypt.compare(password, user.password_hash);
-    if (!validPassword) return res.status(401).json({ error: 'Contraseña incorrecta.' });
-
-    const nombreValidoRenovacion = user.nombre.trim().includes(' ')
-      ? user.nombre.trim()
-      : `${user.nombre.trim()} Joyeria`;
-
-    const orden: any = await new Promise((resolve, reject) => {
-      conekta.Order.create(
-        {
-          currency: 'MXN',
-          customer_info: {
-            name: nombreValidoRenovacion,
-            email: email,
-            phone: user.telefono || '+521000000000', // ✅ FIX #5: teléfono real del usuario
-          },
-          line_items: [
-            { name: 'Renovación Mensual Vendor Hub', unit_price: 29900, quantity: 1 },
-          ],
-          charges: [{ payment_method: { type: 'card', token_id: token_id } }],
-        },
-        (err: any, res: any) => {
-          if (err) reject(err);
-          else resolve(res);
-        }
-      );
-    });
-
-    const updateQuery = `
-      UPDATE usuarios
-      SET suscripcion_fin = NOW() + INTERVAL '1 month', suscripcion_estado = 'activa'
-      WHERE id = $1
+    const insertUserQuery = `
+      INSERT INTO usuarios (
+        id, nombre, email, password_hash, telefono, marca_id,
+        suscripcion_estado, activo
+      )
+      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'pendiente', false)
+      RETURNING id;
     `;
-    await client.query(updateQuery, [user.id]);
+    const result = await pool.query(insertUserQuery, [
+      nombre.trim(),
+      correo,
+      hashedPassword,
+      telefono?.trim() || null,
+      marca_id ?? 1,
+    ]);
+    const newUserId = result.rows[0].id;
 
-    await client.query('COMMIT');
-    return res.status(200).json({ success: true, message: '¡Tu suscripción ha sido renovada con éxito!' });
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    const msg = error.details?.[0]?.message || error.message || 'Error al renovar.';
-    return res.status(400).json({ success: false, error: msg });
-  } finally {
-    client.release();
+    await pool.query(
+      'INSERT INTO usuario_roles (usuario_id, rol_id) VALUES ($1, $2)',
+      [newUserId, 2]
+    );
+
+    return res.status(201).json({
+      success: true,
+      message: 'Cuenta creada. El siguiente paso es activar tu suscripción.',
+      user_id: newUserId,
+      email: correo,
+    });
+  } catch (error) {
+    console.error('ERROR EN REGISTRO DE CUENTA:', error);
+    return res.status(500).json({ error: 'No pudimos crear tu cuenta. Intenta de nuevo en un momento.' });
   }
 };
 

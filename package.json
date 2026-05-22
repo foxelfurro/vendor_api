@@ -22,7 +22,6 @@
     "@types/nodemailer": "^7.0.11",
     "@types/pg": "^8.20.0",
     "bcrypt": "^6.0.0",
-    "conekta": "^3.2.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
