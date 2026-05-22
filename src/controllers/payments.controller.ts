@@ -202,6 +202,7 @@ export const webhookConekta = async (req: Request, res: Response): Promise<any> 
   const evento = req.body || {};
   const tipo: string = evento?.type || '';
   const objeto: any = evento?.data?.object || {};
+  console.log(`📨 Webhook Conekta recibido: ${tipo || '(sin tipo)'}`);
 
   try {
     if (tipo === 'order.paid') {
@@ -212,13 +213,14 @@ export const webhookConekta = async (req: Request, res: Response): Promise<any> 
       await marcarPagoCerrado(objeto?.id, 'fallido');
     } else if (tipo === 'order.pending_payment') {
       await registrarMetodoPendiente(objeto);
+    } else if (tipo === 'subscription.paid') {
+      await procesarSuscripcionPagada(objeto);
     } else if (
-      tipo === 'subscription.paid' ||
       tipo === 'subscription.created' ||
       tipo === 'subscription.updated' ||
       tipo === 'subscription.resumed'
     ) {
-      await procesarSuscripcion(objeto);
+      await vincularSuscripcion(objeto);
     } else if (tipo === 'subscription.payment_failed') {
       await marcarSuscripcionFallida(objeto);
     } else if (
@@ -315,8 +317,13 @@ async function registrarMetodoPendiente(orderObj: any): Promise<void> {
   );
 }
 
-/** subscription.*: guarda la suscripción y sincroniza la fecha de vigencia. */
-async function procesarSuscripcion(subObj: any): Promise<void> {
+/**
+ * subscription.paid: un cobro recurrente se concretó. Es el ÚNICO evento de
+ * suscripción que activa o renueva la cuenta, porque representa un pago real.
+ * billing_cycle_end (epoch en segundos) es la fuente de verdad de la vigencia;
+ * usarlo hace idempotente el reprocesar el mismo evento.
+ */
+async function procesarSuscripcionPagada(subObj: any): Promise<void> {
   const subId: string | undefined = subObj?.id;
   const customerId: string | undefined = subObj?.customer_id;
   if (!subId) return;
@@ -324,11 +331,6 @@ async function procesarSuscripcion(subObj: any): Promise<void> {
   const usuario = await localizarUsuario(subId, customerId);
   if (!usuario) return;
 
-  const estado = String(subObj?.status || '').toLowerCase();
-  const activa = estado === 'active' || estado === 'in_trial' || estado === 'paid';
-
-  // billing_cycle_end (epoch en segundos) es la fuente de verdad de la vigencia:
-  // usarlo hace que reprocesar el mismo evento sea idempotente.
   const cicloFin: number | undefined = subObj?.billing_cycle_end;
   const finISO = cicloFin ? new Date(cicloFin * 1000).toISOString() : null;
 
@@ -336,12 +338,36 @@ async function procesarSuscripcion(subObj: any): Promise<void> {
     `UPDATE usuarios
      SET conekta_subscription_id = $1,
          conekta_customer_id = COALESCE(conekta_customer_id, $2),
-         suscripcion_estado = $3,
-         activo = CASE WHEN $4 THEN true ELSE activo END,
+         suscripcion_estado = 'activa',
+         activo = true,
          suscripcion_inicio = COALESCE(suscripcion_inicio, NOW()),
-         suscripcion_fin = COALESCE($5::timestamp, suscripcion_fin)
-     WHERE id = $6`,
-    [subId, customerId ?? null, activa ? 'activa' : estado || 'desconocido', activa, finISO, usuario.id]
+         suscripcion_fin = COALESCE($3::timestamp, suscripcion_fin, NOW() + INTERVAL '1 month')
+     WHERE id = $4`,
+    [subId, customerId ?? null, finISO, usuario.id]
+  );
+}
+
+/**
+ * subscription.created / updated / resumed: eventos de ciclo de vida.
+ * SOLO vinculan los identificadores de Conekta con el usuario. NUNCA activan la
+ * cuenta ni cambian la vigencia. El acceso se otorga exclusivamente con un pago
+ * confirmado (order.paid o subscription.paid); así, una suscripción creada pero
+ * no pagada jamás concede acceso.
+ */
+async function vincularSuscripcion(subObj: any): Promise<void> {
+  const subId: string | undefined = subObj?.id;
+  const customerId: string | undefined = subObj?.customer_id;
+  if (!subId) return;
+
+  const usuario = await localizarUsuario(subId, customerId);
+  if (!usuario) return;
+
+  await pool.query(
+    `UPDATE usuarios
+     SET conekta_subscription_id = $1,
+         conekta_customer_id = COALESCE(conekta_customer_id, $2)
+     WHERE id = $3`,
+    [subId, customerId ?? null, usuario.id]
   );
 }
 
