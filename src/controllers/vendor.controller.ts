@@ -210,8 +210,8 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
   const { slug } = req.params;
 
   try {
-    // 1. AÑADIDO: 'store_name' a la consulta SQL
-    const userQuery = `SELECT id, nombre, store_name, telefono FROM usuarios WHERE store_slug = $1`;
+    // 1. AÑADIDO: 'store_name' y 'personalizacion' a la consulta SQL
+    const userQuery = `SELECT id, nombre, store_name, telefono, personalizacion FROM usuarios WHERE store_slug = $1`;
     const userResult = await pool.query(userQuery, [slug]);
 
     if (userResult.rows.length === 0) {
@@ -244,6 +244,8 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
         nombre: vendor.nombre,
         store_name: vendor.store_name, // 2. AÑADIDO: Se envía al frontend
         telefono: vendor.telefono,
+        // 3. AÑADIDO: personalización visual de la tienda (color, logo, etc.)
+        personalizacion: vendor.personalizacion ?? {},
       },
       products: inventoryResult.rows
     });
@@ -257,7 +259,9 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
 // PUT /vendor/store-settings
 export const updateStoreSettings = async (req: AuthRequest, res: Response): Promise<any> => {
   const userId = req.user?.user_id;
-  const { store_slug, telefono } = req.body;
+  // `store_name` y `personalizacion` son opcionales: si no llegan, se conservan
+  // los valores que ya tenga la vendedora (COALESCE en el UPDATE).
+  const { store_name, store_slug, telefono, personalizacion } = req.body;
 
   if (!store_slug || !telefono) {
     return res.status(400).json({ error: 'El nombre de la tienda y el teléfono son obligatorios.' });
@@ -269,22 +273,38 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
 
     const checkQuery = 'SELECT id FROM usuarios WHERE store_slug = $1 AND id != $2';
     const checkResult = await pool.query(checkQuery, [cleanSlug, userId]);
-    
+
     if (checkResult.rows.length > 0) {
       return res.status(400).json({ error: 'Este nombre de tienda ya está en uso. Por favor elige otro.' });
     }
 
-    const updateQuery = `
-      UPDATE usuarios 
-      SET store_slug = $1, telefono = $2 
-      WHERE id = $3 
-      RETURNING store_slug, telefono;
-    `;
-    const { rows } = await pool.query(updateQuery, [cleanSlug, cleanPhone, userId]);
+    // La personalización es puramente visual; se serializa a JSON para la
+    // columna JSONB. Si no llega en la petición, se mantiene la existente.
+    const personalizacionJson =
+      personalizacion && typeof personalizacion === 'object'
+        ? JSON.stringify(personalizacion)
+        : null;
 
-    return res.json({ 
-      message: '¡Configuración de tienda guardada exitosamente!', 
-      data: rows[0] 
+    const updateQuery = `
+      UPDATE usuarios
+      SET store_name = COALESCE($1, store_name),
+          store_slug = $2,
+          telefono = $3,
+          personalizacion = COALESCE($4::jsonb, personalizacion)
+      WHERE id = $5
+      RETURNING store_name, store_slug, telefono, personalizacion;
+    `;
+    const { rows } = await pool.query(updateQuery, [
+      store_name ?? null,
+      cleanSlug,
+      cleanPhone,
+      personalizacionJson,
+      userId,
+    ]);
+
+    return res.json({
+      message: '¡Configuración de tienda guardada exitosamente!',
+      data: rows[0]
     });
 
   } catch (error) {
