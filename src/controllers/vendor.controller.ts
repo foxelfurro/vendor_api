@@ -1,3 +1,18 @@
+/**
+ * @file vendor.controller.ts
+ * @description Controlador de operaciones del vendedor.
+ *
+ * Endpoints que maneja (todos requieren token válido):
+ *  - GET    /vendor/explore           → Catálogo maestro disponible para agregar.
+ *  - GET    /vendor/inventory          → Inventario actual del vendedor.
+ *  - POST   /vendor/inventory          → Agrega joya del catálogo al inventario.
+ *  - POST   /vendor/inventory/custom   → Crea una joya propia (pendiente de aprobación).
+ *  - PUT    /vendor/inventory/:id      → Actualiza precio o stock de un ítem.
+ *  - DELETE /vendor/inventory/:id      → Elimina un ítem del inventario.
+ *  - GET    /store/:slug               → Catálogo público de la tienda de una vendedora.
+ *  - PUT    /vendor/store-settings     → Actualiza datos de la tienda (slug, teléfono, personalización).
+ */
+
 import { Request, Response } from 'express';
 import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
@@ -45,7 +60,7 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
       : await pool.query(vendorQuery, [vendorId, marcaId]);
     res.json(rows);
   } catch (error) {
-    console.error("🔥 ERROR EN EXPLORE:", error);
+    console.error("Error en exploreCatalog:", error);
     res.status(500).json({ error: 'Error al cargar el catálogo para explorar.' });
   }
 };
@@ -80,7 +95,7 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
     const { rows } = await pool.query(query, [vendorId]);
     res.json(rows);
   } catch (error) {
-    console.error("🔥 ERROR EN INVENTARIO:", error);
+    console.error("Error en getInventory:", error);
     res.status(500).json({ error: 'Error al cargar tu inventario personal.' });
   }
 };
@@ -118,7 +133,7 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
         error: 'Esta joya ya está en tu inventario. Ve a la pestaña de "Inventario" para actualizar el stock.' 
       });
     }
-    console.error("🔥 ERROR AL AGREGAR AL INVENTARIO:", error);
+    console.error("Error en addToInventory:", error);
     res.status(500).json({ error: 'Hubo un error interno al guardar la joya en tu inventario.' });
   }
 };
@@ -150,7 +165,7 @@ export const updateInventoryItem = async (req: AuthRequest, res: Response) => {
       producto: rows[0]
     });
   } catch (error) {
-    console.error("🔥 ERROR AL ACTUALIZAR INVENTARIO:", error);
+    console.error("Error en updateInventoryItem:", error);
     res.status(500).json({ error: 'Error al actualizar los datos del producto.' });
   }
 };
@@ -198,7 +213,7 @@ export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
     res.json({ message: 'Joya eliminada de tu vitrina correctamente.' });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error("🔥 ERROR AL ELIMINAR ITEM DEL INVENTARIO:", error);
+    console.error("Error en deleteInventoryItem:", error);
     res.status(500).json({ error: 'Error al eliminar el producto de tu inventario.' });
   } finally {
     client.release();
@@ -251,7 +266,7 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    console.error("🔥 ERROR EN CATÁLOGO PÚBLICO:", error);
+    console.error("Error en getSellerCatalogBySlug:", error);
     res.status(500).json({ error: 'Error al cargar el catálogo.' });
   }
 };
@@ -382,7 +397,7 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
     if (error.code === '23505') {
       return res.status(409).json({ error: 'Ya existe una joya con ese SKU. Usa un código diferente.' });
     }
-    console.error("🔥 ERROR AL AGREGAR JOYA CUSTOM:", error);
+    console.error("Error en addCustomToInventory:", error);
     res.status(500).json({ error: 'Hubo un error al guardar tu joya personalizada.' });
   } finally {
     client.release();

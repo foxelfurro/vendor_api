@@ -1,3 +1,16 @@
+/**
+ * @file auth.controller.ts
+ * @description Controlador de autenticación y gestión de cuentas.
+ *
+ * Endpoints que maneja:
+ *  - POST /auth/login          → Inicio de sesión con CAPTCHA Turnstile.
+ *  - GET  /auth/me             → Datos del usuario autenticado.
+ *  - POST /auth/register       → Registro de cuenta nueva (inactiva hasta pagar).
+ *  - POST /auth/forgot-password → Solicitud de recuperación de contraseña.
+ *  - POST /auth/reset-password  → Restablecimiento de contraseña con token.
+ *  - POST /auth/logout          → Cierre de sesión (borra la cookie JWT).
+ */
+
 import { Request, Response } from 'express';
 import { pool } from '../config/db';
 import jwt from 'jsonwebtoken';
@@ -58,7 +71,7 @@ export const login = async (req: Request, res: Response): Promise<any> => {
   }
 
   try {
-    // ✅ FIX #1: Ahora sí se valida el resultado del CAPTCHA antes de continuar
+    // Valida el CAPTCHA antes de continuar
     const isHuman = await verifyCaptcha(captcha_token);
     if (!isHuman) {
       return res.status(403).json({ error: 'Verificación de seguridad fallida.' });
@@ -313,7 +326,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<any> =
   }
 };
 
-// ✅ FIX #4: Tipo de retorno corregido a void para consistencia con Express
+// Cierre de sesión: elimina la cookie JWT del cliente
 export const logout = (req: Request, res: Response): void => {
   res.clearCookie('token', {
     httpOnly: true,

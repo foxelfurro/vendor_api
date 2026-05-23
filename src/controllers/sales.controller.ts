@@ -1,3 +1,12 @@
+/**
+ * @file sales.controller.ts
+ * @description Controlador de registro y consulta de ventas.
+ *
+ * Endpoints que maneja (todos requieren token válido):
+ *  - POST /sales/register  → Registra una venta y descuenta stock en transacción.
+ *  - GET  /sales/history   → Historial de ventas del vendedor autenticado.
+ */
+
 import { Response } from 'express';
 import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
@@ -46,7 +55,7 @@ export const registerSale = async (req: AuthRequest, res: Response) => {
 
   } catch (error: any) {
     await client.query('ROLLBACK');
-    console.error("🔥 ERROR AL REGISTRAR VENTA:", error.message);
+    console.error("Error en registerSale:", error.message);
     res.status(400).json({ error: error.message });
   } finally {
     client.release();
@@ -76,7 +85,7 @@ export const getSalesHistory = async (req: AuthRequest, res: Response) => {
     const { rows } = await pool.query(query, [vendorId]);
     res.json(rows);
   } catch (error) {
-    console.error("🔥 ERROR AL OBTENER HISTORIAL:", error);
+    console.error("Error en getSalesHistory:", error);
     res.status(500).json({ error: 'No se pudo cargar el historial de ventas.' });
   }
 };

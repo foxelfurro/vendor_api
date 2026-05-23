@@ -1,3 +1,14 @@
+/**
+ * @file dashboard.controller.ts
+ * @description Controlador de estadísticas del panel de control del vendedor.
+ *
+ * Ejecuta múltiples consultas en paralelo para construir el payload de
+ * métricas que consume el componente Dashboard del frontend.
+ *
+ * Endpoint que maneja (requiere token válido):
+ *  - GET /vendor/dashboard-stats → KPIs, últimas ventas, gráficas y alertas.
+ */
+
 import { Response } from 'express';
 import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
@@ -108,7 +119,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     });
 
   } catch (error) {
-    console.error("🔥 ERROR EN DASHBOARD STATS:", error);
+    console.error("Error en getDashboardStats:", error);
     res.status(500).json({ error: 'No se pudieron generar las estadísticas.' });
   }
 };

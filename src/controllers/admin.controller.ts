@@ -1,5 +1,20 @@
+/**
+ * @file admin.controller.ts
+ * @description Controlador de operaciones administrativas.
+ *
+ * Todos los endpoints requieren token válido + rol de administrador (rol_id = 1).
+ *
+ * Endpoints que maneja:
+ *  - POST   /admin/users                  → Crear nuevo usuario.
+ *  - POST   /admin/catalogo               → Agregar joya al catálogo maestro.
+ *  - GET    /admin/categorias             → Listar categorías disponibles.
+ *  - GET    /admin/catalogo/pendientes    → Joyas propias pendientes de aprobación.
+ *  - PUT    /admin/catalogo/:id           → Editar joya (SKU, categoría, etc.).
+ *  - POST   /admin/catalogo/:id/aprobar   → Aprobar joya pendiente.
+ *  - DELETE /admin/catalogo/:id           → Rechazar/eliminar joya pendiente.
+ */
+
 import { Request, Response } from 'express';
-// Asegúrate de importar tu conexión a la base de datos (ajusta la ruta según tu proyecto)
 import { pool } from '../config/db';
 
 export const createUser = async (req: Request, res: Response): Promise<any> => {

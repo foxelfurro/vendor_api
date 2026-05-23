@@ -176,7 +176,7 @@ export const crearCheckout = async (req: Request, res: Response): Promise<any> =
 
     return res.status(200).json({ pago_id: pagoId, url });
   } catch (error: any) {
-    console.error('🔥 ERROR AL CREAR CHECKOUT:', error);
+    console.error('Error en crearCheckout:', error);
     return res.status(400).json({ error: mensajeAmigablePago(error) });
   }
 };
@@ -213,16 +213,16 @@ export const webhookConekta = async (req: Request, res: Response): Promise<any> 
   const evento = req.body || {};
   const tipo: string = evento?.type || '';
   const objeto: any = evento?.data?.object || {};
-  console.log(`📨 Webhook Conekta recibido: ${tipo || '(sin tipo)'}`);
+  console.log(`Webhook Conekta recibido: ${tipo || '(sin tipo)'}`);
 
   // Para eventos de fallo se vuelca el detalle completo del payload, y si el
   // fallo es de una suscripción, se consulta la orden del ciclo para ver el
   // failure_code / failure_message EXACTO del cargo rechazado.
   if (/failed|declined|canceled|expired|fraud/.test(tipo)) {
     try {
-      console.log('   ⚠️  Detalle del evento de fallo:', JSON.stringify(objeto, null, 2));
+      console.log('   Detalle del evento de fallo:', JSON.stringify(objeto, null, 2));
     } catch {
-      console.log('   ⚠️  Detalle del evento de fallo: no se pudo serializar.');
+      console.log('   Detalle del evento de fallo: no se pudo serializar.');
     }
 
     const ordenIdFallo: string | undefined =
@@ -234,7 +234,7 @@ export const webhookConekta = async (req: Request, res: Response): Promise<any> 
         const ordenFallo: any = await conektaRequest('GET', `/orders/${ordenIdFallo}`);
         const cargo = ordenFallo?.charges?.data?.[0];
         console.log(
-          `   ⚠️  Cargo de la orden ${ordenIdFallo}:`,
+          `   Cargo de la orden ${ordenIdFallo}:`,
           JSON.stringify(
             {
               order_payment_status: ordenFallo?.payment_status,
@@ -248,7 +248,7 @@ export const webhookConekta = async (req: Request, res: Response): Promise<any> 
           )
         );
       } catch (e: any) {
-        console.log(`   ⚠️  No se pudo consultar la orden ${ordenIdFallo}:`, e?.message || e);
+        console.log(`   No se pudo consultar la orden ${ordenIdFallo}:`, e?.message || e);
       }
     }
   }
@@ -282,7 +282,7 @@ export const webhookConekta = async (req: Request, res: Response): Promise<any> 
     // Los demás eventos se ignoran de forma silenciosa.
     return res.status(200).json({ received: true });
   } catch (error) {
-    console.error(`🔥 ERROR procesando webhook "${tipo}":`, error);
+    console.error(`Error procesando webhook "${tipo}":`, error);
     // Un 500 hace que Conekta reintente el envío más tarde.
     return res.status(500).json({ error: 'Error procesando el evento.' });
   }
