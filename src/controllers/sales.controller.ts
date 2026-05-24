@@ -40,8 +40,8 @@ export const registerSale = async (req: AuthRequest, res: Response) => {
     // 2. Registramos el movimiento para sus reportes
     const precioTotal = cantidad * precio_unitario;
     const insertSaleQuery = `
-      INSERT INTO ventas (vendedor_id, inventario_id, cantidad, precio_total)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO ventas (vendedor_id, inventario_id, cantidad, precio_total, fecha)
+      VALUES ($1, $2, $3, $4, NOW())
       RETURNING id;
     `;
     await client.query(insertSaleQuery, [vendorId, inventario_id, cantidad, precioTotal]);
