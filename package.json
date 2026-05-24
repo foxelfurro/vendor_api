@@ -30,6 +30,7 @@
     "nodemailer": "^8.0.4",
     "pg": "^8.20.0",
     "resend": "^6.12.3",
+    "stripe": "^22.1.1",
     "typescript": "^5.9.3"
   },
   "devDependencies": {

@@ -22,7 +22,7 @@ import { Resend } from 'resend';
 const resend = new Resend(process.env.RESEND_API_KEY);
 
 // Los pagos ya NO se procesan aquí: se manejan en payments.controller.ts
-// mediante el Checkout alojado de Conekta.
+// mediante el Checkout alojado de Stripe.
 
 // --- FUNCIÓN DE AYUDA PARA VALIDAR CAPTCHA (Cloudflare Turnstile) ---
 const verifyCaptcha = async (token: string): Promise<boolean> => {

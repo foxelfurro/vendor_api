@@ -2,7 +2,7 @@
 
 API REST para **Qlatte Lumin** — plataforma SaaS de gestión de joyería para vendedoras.
 
-Gestiona autenticación, catálogo maestro, inventarios por vendedora, ventas y pagos mediante el Checkout alojado de Conekta.
+Gestiona autenticación, catálogo maestro, inventarios por vendedora, ventas y pagos de suscripción mediante el Checkout alojado de Stripe.
 
 ---
 
@@ -11,10 +11,10 @@ Gestiona autenticación, catálogo maestro, inventarios por vendedora, ventas y 
 | Capa | Tecnología |
 |---|---|
 | Runtime | Node.js 20 + TypeScript |
-| Framework | Express 4 |
+| Framework | Express 5 |
 | Base de datos | PostgreSQL (Neon / Supabase) |
 | Autenticación | JWT en cookie httpOnly |
-| Pasarela de pagos | Conekta (Checkout alojado) |
+| Pasarela de pagos | Stripe (Checkout alojado + suscripciones) |
 | Correo transaccional | Resend |
 | Captcha | Cloudflare Turnstile |
 | Seguridad de contraseñas | bcrypt |
@@ -27,19 +27,21 @@ Gestiona autenticación, catálogo maestro, inventarios por vendedora, ventas y 
 src/
 ├── config/
 │   ├── db.ts            # Pool de conexiones PostgreSQL
-│   └── conekta.ts       # Cliente HTTP para la API de Conekta
+│   └── stripe.ts        # Cliente del SDK de Stripe (apiVersion fijada)
 ├── controllers/
 │   ├── auth.controller.ts       # Login, registro, recuperación de contraseña
 │   ├── vendor.controller.ts     # Catálogo, inventario, tienda pública
 │   ├── sales.controller.ts      # Registro e historial de ventas
 │   ├── dashboard.controller.ts  # Estadísticas y KPIs del panel
-│   ├── payments.controller.ts   # Checkout y webhook de Conekta
+│   ├── payments.controller.ts   # Checkout y webhook de Stripe
 │   └── admin.controller.ts      # Gestión de usuarios y aprobaciones
 ├── middlewares/
 │   └── auth.middleware.ts       # Verificación JWT + control de rol admin
 ├── lib/
-│   └── conektaErrors.ts         # Mensajes amigables de errores de Conekta
+│   └── stripeErrors.ts          # Mensajes amigables de errores de Stripe
 └── index.ts                     # Punto de entrada, definición de rutas
+
+migrations/                      # Scripts SQL de migración (orden cronológico)
 ```
 
 ---
@@ -86,9 +88,9 @@ npm start
 | POST | `/auth/register` | Registro de nueva cuenta |
 | POST | `/auth/forgot-password` | Solicitar enlace de recuperación de contraseña |
 | POST | `/auth/reset-password` | Restablecer contraseña con token |
-| POST | `/payments/checkout` | Crear sesión de pago en Conekta |
+| POST | `/payments/checkout` | Iniciar el pago: devuelve la URL del Checkout (suscripción nueva) o del Billing Portal (si ya existe suscripción) |
 | GET  | `/payments/estado/:pagoId` | Consultar estado de un pago |
-| POST | `/webhooks/conekta/:secret` | Recibir eventos de Conekta |
+| POST | `/webhooks/stripe` | Recibir eventos de Stripe (firma HMAC) |
 | GET  | `/store/:slug` | Catálogo público de la tienda de una vendedora |
 
 ### Vendedor (requieren JWT)
@@ -96,6 +98,7 @@ npm start
 | Método | Ruta | Descripción |
 |---|---|---|
 | GET    | `/auth/me` | Datos del usuario autenticado |
+| POST   | `/payments/portal` | Abrir el Billing Portal de Stripe para gestionar la suscripción |
 | GET    | `/vendor/explore` | Catálogo maestro disponible para agregar |
 | GET    | `/vendor/inventory` | Inventario del vendedor |
 | POST   | `/vendor/inventory` | Agregar joya del catálogo al inventario |
@@ -124,10 +127,20 @@ npm start
 ## Flujo de negocio
 
 1. **Registro** — La cuenta se crea inactiva (`activo = false`, `suscripcion_estado = 'pendiente'`).
-2. **Pago** — El Checkout alojado de Conekta activa la cuenta cuando el webhook confirma el pago.
-3. **Catálogo maestro** — Joyas globales de la marca. Los admins las crean y aprueban; las vendedoras pueden proponer las suyas propias desde su inventario.
-4. **Inventario** — Cada vendedora tiene su vitrina personal con precios personalizados.
-5. **Ventas** — Se registran por ID de inventario; el stock se descuenta en transacción atómica para evitar inconsistencias.
+2. **Pago** — `POST /payments/checkout` crea una sesión de Checkout de Stripe en modo `subscription`. La persona paga en la página segura de Stripe y, cuando el webhook (`invoice.payment_succeeded`) confirma el cobro, la cuenta se activa y se fija la vigencia de la suscripción.
+3. **Renovación** — Stripe cobra la suscripción cada mes de forma automática; cada cobro dispara un nuevo `invoice.payment_succeeded` que extiende `suscripcion_fin`. Los cobros fallidos marcan la cuenta como `pago_fallido`.
+4. **Gestión de la suscripción** — Quien ya tiene una suscripción usa el **Billing Portal** de Stripe para actualizar su método de pago, ver facturas, cancelar o reanudar. El aviso de renovación de la app abre el portal con `POST /payments/portal`; y `POST /payments/checkout` redirige también al portal si detecta una suscripción existente, en vez de crear una duplicada.
+5. **Catálogo maestro** — Joyas globales de la marca. Los admins las crean y aprueban; las vendedoras pueden proponer las suyas propias desde su inventario.
+6. **Inventario** — Cada vendedora tiene su vitrina personal con precios personalizados.
+7. **Ventas** — Se registran por ID de inventario; el stock se descuenta en transacción atómica para evitar inconsistencias.
+
+### Webhook de Stripe
+
+El endpoint `POST /webhooks/stripe` se registra **antes** de `express.json()` porque necesita el cuerpo crudo (`Buffer`) para verificar la firma HMAC. Eventos procesados: `checkout.session.completed`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.updated` y `customer.subscription.deleted`.
+
+### Billing Portal
+
+El Billing Portal (gestión de la suscripción) debe habilitarse una vez en el panel de Stripe: **Settings → Billing → Customer portal**. Sin esa configuración activada, `POST /payments/portal` y la redirección al portal desde `POST /payments/checkout` fallan. No requiere variables de entorno adicionales.
 
 ---
 
@@ -137,6 +150,8 @@ Consulta `.env.example` para la lista completa y documentada. Las mínimas para 
 
 - `DATABASE_URL`
 - `JWT_SECRET`
-- `CONEKTA_PRIVATE_KEY`
+- `STRIPE_SECRET_KEY`
+- `STRIPE_PRICE_ID`
+- `STRIPE_WEBHOOK_SECRET`
 - `TURNSTILE_SECRET_KEY`
 - `RESEND_API_KEY`

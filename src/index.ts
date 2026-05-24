@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 
 import { verifyToken, isAdmin } from './middlewares/auth.middleware';
 import { login, logout, getMe, registerAccount, forgotPassword, resetPassword } from './controllers/auth.controller';
-import { crearCheckout, estadoPago, webhookConekta } from './controllers/payments.controller';
+import { crearCheckout, estadoPago, webhookStripe, crearPortalAutenticado } from './controllers/payments.controller';
 import { getSalesHistory, registerSale } from './controllers/sales.controller';
 
 // 1. IMPORTACIONES DEL VENDEDOR: Quitamos requestCatalogItem y agregamos addCustomToInventory
@@ -23,8 +23,13 @@ app.use(cookieParser());
 // Configuramos el CORS
 app.use(cors({
     origin: ['https://lumin.qlatte.com', 'http://localhost:5173','https://api.qlatte.com' ],
-    credentials: true 
+    credentials: true
 }));
+
+// IMPORTANTE: el webhook de Stripe necesita el body RAW (Buffer) para verificar
+// la firma HMAC. Esta ruta debe registrarse ANTES de express.json(), de lo
+// contrario la verificación siempre fallará.
+app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), webhookStripe);
 
 // Aumentamos el límite para permitir que pasen las fotos en Base64
 app.use(express.json({ limit: '50mb' }));
@@ -38,12 +43,13 @@ app.post('/auth/reset-password', resetPassword);
 app.post('/auth/register', registerAccount);
 app.get('/store/:slug', getSellerCatalogBySlug);
 
-// --- PAGOS (Conekta) ---
+// --- PAGOS (Stripe) ---
 // Públicas: se identifican con correo + contraseña dentro del propio controlador.
 app.post('/payments/checkout', crearCheckout);
 app.get('/payments/estado/:pagoId', estadoPago);
-// Webhook de Conekta. El secreto va en la URL configurada en el panel de Conekta.
-app.post('/webhooks/conekta/:secret', webhookConekta);
+// Billing Portal: requiere sesión activa (lo usa el aviso de renovación in-app).
+app.post('/payments/portal', verifyToken, crearPortalAutenticado);
+// El webhook de Stripe ya fue registrado antes de express.json() (ver arriba).
 
 // --- RUTAS PROTEGIDAS (Requieren verifyToken) ---
 
