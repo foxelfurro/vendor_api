@@ -322,7 +322,12 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
       data: rows[0]
     });
 
-  } catch (error) {
+  } catch (error: any) {
+    // El slug tiene una restricción UNIQUE. Si otra vendedora lo tomó entre la
+    // verificación y el UPDATE (condición de carrera), Postgres lanza 23505.
+    if (error?.code === '23505') {
+      return res.status(400).json({ error: 'Este nombre de tienda ya está en uso. Por favor elige otro.' });
+    }
     console.error(" ERROR AL ACTUALIZAR TIENDA:", error);
     return res.status(500).json({ error: 'Error al actualizar la configuración de tu tienda.' });
   }

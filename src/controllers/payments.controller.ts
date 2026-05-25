@@ -454,8 +454,7 @@ async function activarCuenta(
 
     await client.query(
       `UPDATE usuarios
-       SET activo                 = true,
-           suscripcion_estado     = 'activa',
+       SET suscripcion_estado     = 'activa',
            suscripcion_inicio     = COALESCE(suscripcion_inicio, NOW()),
            -- Vigencia: la fecha absoluta de Stripe si está disponible; si no,
            -- se conserva la actual; como último recurso, un mes desde ahora.

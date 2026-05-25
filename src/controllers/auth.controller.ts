@@ -78,8 +78,8 @@ export const login = async (req: Request, res: Response): Promise<any> => {
     }
 
     const query = `
-      SELECT u.id, u.marca_id, u.password_hash, u.suscripcion_fin, u.suscripcion_estado,
-             u.activo, ur.rol_id AS rol
+      SELECT u.id, u.marca_id, u.email, u.password_hash, u.suscripcion_fin, u.suscripcion_estado,
+             ur.rol_id AS rol
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
       WHERE LOWER(u.email) = LOWER($1)
@@ -99,15 +99,12 @@ export const login = async (req: Request, res: Response): Promise<any> => {
     }
 
     // Cuenta registrada pero sin suscripción pagada todavía.
-    if (!user.activo && user.suscripcion_estado === 'pendiente') {
+    // El acceso se determina solo con suscripcion_estado y suscripcion_fin.
+    if (user.suscripcion_estado === 'pendiente') {
       return res.status(403).json({
         error: 'Tu cuenta está registrada pero aún no tiene una suscripción activa. Completa tu pago para entrar.',
         code: 'PENDING_SUBSCRIPTION',
       });
-    }
-
-    if (!user.activo) {
-      return res.status(403).json({ error: 'Tu cuenta está desactivada. Contacta a soporte.' });
     }
 
     // Suscripción vencida.
@@ -118,8 +115,10 @@ export const login = async (req: Request, res: Response): Promise<any> => {
       });
     }
 
+    // El email se incluye en el token porque algunos controladores lo leen de
+    // req.user (p. ej. la notificación de joya propia en addCustomToInventory).
     const token = jwt.sign(
-      { user_id: user.id, rol: user.rol, marca_id: user.marca_id },
+      { user_id: user.id, email: user.email, rol: user.rol, marca_id: user.marca_id },
       process.env.JWT_SECRET as string,
       { expiresIn: '24h' }
     );
@@ -168,7 +167,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
 // =============================================================================
 // REGISTRO DE CUENTA  (paso 1 de 2 — SIN cobro)
 // -----------------------------------------------------------------------------
-// Crea la cuenta INACTIVA (activo = false, suscripcion_estado = 'pendiente').
+// Crea la cuenta con suscripcion_estado = 'pendiente' (sin acceso hasta pagar).
 // El cobro de la suscripción es un paso aparte (payments.controller.ts), de modo
 // que si el pago no se concreta la cuenta no se pierde: la persona puede iniciar
 // el pago después con su correo y contraseña.
@@ -200,9 +199,9 @@ export const registerAccount = async (req: Request, res: Response): Promise<any>
     const insertUserQuery = `
       INSERT INTO usuarios (
         id, nombre, email, password_hash, telefono, marca_id,
-        suscripcion_estado, activo
+        suscripcion_estado
       )
-      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'pendiente', false)
+      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'pendiente')
       RETURNING id;
     `;
     const result = await pool.query(insertUserQuery, [
@@ -236,7 +235,9 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
   const { email } = req.body;
 
   try {
-    const queryUser = 'SELECT id, email FROM usuarios WHERE email = $1';
+    // LOWER en ambos lados: el correo se guarda en minúsculas al registrarse,
+    // así que la búsqueda no debe depender de cómo lo escriba la persona.
+    const queryUser = 'SELECT id, email FROM usuarios WHERE LOWER(email) = LOWER($1)';
     const { rows } = await pool.query(queryUser, [email]);
 
     if (rows.length === 0) {

@@ -256,13 +256,17 @@ export const deleteUser = async (req: Request, res: Response): Promise<any> => {
     const { id } = req.params;
     
     try {
+        // "Soft delete": se marca la suscripción como cancelada y se expira la
+        // vigencia, de modo que el login bloquee el acceso de inmediato. Las
+        // ventas y estadísticas del usuario se conservan.
         const query = `
-            UPDATE usuarios 
-            SET activo = false 
-            WHERE id = $1 
+            UPDATE usuarios
+            SET suscripcion_estado = 'cancelada',
+                suscripcion_fin    = NOW()
+            WHERE id = $1
             RETURNING id;
         `;
-        
+
         const result = await pool.query(query, [id]);
 
         if (result.rowCount === 0) {

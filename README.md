@@ -126,7 +126,7 @@ npm start
 
 ## Flujo de negocio
 
-1. **Registro** — La cuenta se crea inactiva (`activo = false`, `suscripcion_estado = 'pendiente'`).
+1. **Registro** — La cuenta se crea con `suscripcion_estado = 'pendiente'` (sin acceso hasta completar el pago).
 2. **Pago** — `POST /payments/checkout` crea una sesión de Checkout de Stripe en modo `subscription`. La persona paga en la página segura de Stripe y, cuando el webhook (`invoice.payment_succeeded`) confirma el cobro, la cuenta se activa y se fija la vigencia de la suscripción.
 3. **Renovación** — Stripe cobra la suscripción cada mes de forma automática; cada cobro dispara un nuevo `invoice.payment_succeeded` que extiende `suscripcion_fin`. Los cobros fallidos marcan la cuenta como `pago_fallido`.
 4. **Gestión de la suscripción** — Quien ya tiene una suscripción usa el **Billing Portal** de Stripe para actualizar su método de pago, ver facturas, cancelar o reanudar. El aviso de renovación de la app abre el portal con `POST /payments/portal`; y `POST /payments/checkout` redirige también al portal si detecta una suscripción existente, en vez de crear una duplicada.

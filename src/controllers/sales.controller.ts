@@ -15,9 +15,21 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 
 // --- 1. REGISTRAR VENTA (Solo control de inventario) ---
 // El joyero usa esto para decir "Hoy vendí esta joya, descuéntala de mi stock"
-export const registerSale = async (req: AuthRequest, res: Response) => {
+export const registerSale = async (req: AuthRequest, res: Response): Promise<any> => {
   const { inventario_id, cantidad, precio_unitario } = req.body;
   const vendorId = req.user?.user_id;
+
+  // Validación de entrada. Sin ella, una cantidad negativa o cero AUMENTARÍA el
+  // stock (stock - cantidad) y dejaría registrada una venta inválida; un precio
+  // no numérico produciría un total NaN.
+  const cant = Number(cantidad);
+  const precio = Number(precio_unitario);
+  if (!inventario_id || !Number.isInteger(cant) || cant <= 0) {
+    return res.status(400).json({ error: 'La cantidad debe ser un número entero mayor que cero.' });
+  }
+  if (!Number.isFinite(precio) || precio < 0) {
+    return res.status(400).json({ error: 'El precio unitario no es válido.' });
+  }
 
   const client = await pool.connect();
 
@@ -26,25 +38,25 @@ export const registerSale = async (req: AuthRequest, res: Response) => {
 
     // 1. Descontamos del stock
     const updateStockQuery = `
-      UPDATE inventario_vendedor 
-      SET stock = stock - $1 
+      UPDATE inventario_vendedor
+      SET stock = stock - $1
       WHERE id = $2 AND vendedor_id = $3 AND stock >= $1
       RETURNING id, stock;
     `;
-    const stockResult = await client.query(updateStockQuery, [cantidad, inventario_id, vendorId]);
+    const stockResult = await client.query(updateStockQuery, [cant, inventario_id, vendorId]);
 
     if (stockResult.rowCount === 0) {
       throw new Error('No hay stock suficiente o el producto no pertenece a tu inventario.');
     }
 
     // 2. Registramos el movimiento para sus reportes
-    const precioTotal = cantidad * precio_unitario;
+    const precioTotal = cant * precio;
     const insertSaleQuery = `
       INSERT INTO ventas (vendedor_id, inventario_id, cantidad, precio_total, fecha)
       VALUES ($1, $2, $3, $4, NOW())
       RETURNING id;
     `;
-    await client.query(insertSaleQuery, [vendorId, inventario_id, cantidad, precioTotal]);
+    await client.query(insertSaleQuery, [vendorId, inventario_id, cant, precioTotal]);
 
     await client.query('COMMIT');
 
