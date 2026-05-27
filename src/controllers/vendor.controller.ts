@@ -22,16 +22,21 @@ import { Resend } from 'resend';
 const resend = new Resend(process.env.RESEND_API_KEY || 're_tu_api_key_aqui');
 
 // GET /vendor/explore
-// Muestra productos del catálogo de SU MARCA que AÚN NO están en su inventario
+// Muestra productos del catálogo de SU MARCA que AÚN NO están en su inventario.
+//
+// Admin: paginación + búsqueda + filtros se aplican en el servidor (en SQL).
+// El servidor NUNCA materializa toda la tabla en memoria; solo el slice solicitado.
+// Query params soportados por admin: page, limit, search, categoria_id,
+// orden_precio (asc|desc), precio_min, precio_max.
+//
+// Vendedora: como antes (lista plana sin paginar, ya está acotada por marca/no-en-inventario).
 export const exploreCatalog = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const marcaId = req.user?.marca_id;
   const esAdmin = req.user?.rol === 1;
 
-  // Paginación: evita cargar miles de filas (con imágenes Base64) de golpe.
-  // El admin puede tener 5k+ items; sin LIMIT se agota la RAM del proceso.
   const page = Math.max(1, parseInt(req.query.page as string) || 1);
-  const pageSize = Math.min(100, parseInt(req.query.limit as string) || 100);
+  const pageSize = Math.min(100, parseInt(req.query.limit as string) || 30);
   const offset = (page - 1) * pageSize;
 
   try {
@@ -41,16 +46,80 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
       c.nombre AS categoria
     `;
 
-    // El administrador ve TODO el catálogo maestro aprobado (para gestionarlo).
-    // La vendedora ve solo las joyas aprobadas de su marca que aún no tiene.
-    const adminQuery = `
-      SELECT ${columnas}, COUNT(*) OVER() AS total_count
-      FROM catalogo_maestro cm
-      LEFT JOIN categorias c ON cm.categoria_id = c.id
-      WHERE cm.estado = true
-      ORDER BY cm.nombre
-      LIMIT $1 OFFSET $2;
-    `;
+    if (esAdmin) {
+      // ── Filtros opcionales del admin ─────────────────────────────────────
+      const search = String(req.query.search ?? '').trim().toLowerCase();
+      const categoriaIdRaw = req.query.categoria_id;
+      const categoriaId =
+        categoriaIdRaw != null && categoriaIdRaw !== '' ? parseInt(categoriaIdRaw as string) : null;
+      const ordenPrecio = req.query.orden_precio === 'asc' || req.query.orden_precio === 'desc'
+        ? (req.query.orden_precio as 'asc' | 'desc')
+        : null;
+      const precioMin = req.query.precio_min != null && req.query.precio_min !== ''
+        ? Number(req.query.precio_min)
+        : null;
+      const precioMax = req.query.precio_max != null && req.query.precio_max !== ''
+        ? Number(req.query.precio_max)
+        : null;
+
+      const conditions: string[] = ['cm.estado = true'];
+      const params: any[] = [];
+      let i = 0;
+
+      if (search) {
+        // Busca por nombre, SKU vigente y SKUs anteriores (case-insensitive).
+        i += 1;
+        const p = `%${search}%`;
+        conditions.push(
+          `(LOWER(cm.nombre) LIKE $${i} OR LOWER(cm.sku) LIKE $${i} OR EXISTS (
+             SELECT 1 FROM unnest(cm.skus_anteriores) s WHERE LOWER(s) LIKE $${i}
+           ))`
+        );
+        params.push(p);
+      }
+      if (Number.isFinite(categoriaId) && categoriaId !== null) {
+        i += 1;
+        conditions.push(`cm.categoria_id = $${i}`);
+        params.push(categoriaId);
+      }
+      if (Number.isFinite(precioMin) && precioMin !== null) {
+        i += 1;
+        conditions.push(`cm.precio_sugerido >= $${i}`);
+        params.push(precioMin);
+      }
+      if (Number.isFinite(precioMax) && precioMax !== null) {
+        i += 1;
+        conditions.push(`cm.precio_sugerido <= $${i}`);
+        params.push(precioMax);
+      }
+
+      // Orden: por precio si se pidió, si no por nombre (alfabético natural).
+      let orderClause = 'cm.nombre';
+      if (ordenPrecio === 'asc') orderClause = 'cm.precio_sugerido ASC NULLS LAST, cm.nombre';
+      else if (ordenPrecio === 'desc') orderClause = 'cm.precio_sugerido DESC NULLS LAST, cm.nombre';
+
+      const limitIdx = i + 1;
+      const offsetIdx = i + 2;
+      params.push(pageSize, offset);
+
+      const adminQuery = `
+        SELECT ${columnas}, COUNT(*) OVER() AS total_count
+        FROM catalogo_maestro cm
+        LEFT JOIN categorias c ON cm.categoria_id = c.id
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY ${orderClause}
+        LIMIT $${limitIdx} OFFSET $${offsetIdx};
+      `;
+
+      const { rows } = await pool.query(adminQuery, params);
+      const totalCount = rows.length > 0 ? parseInt(rows[0].total_count) : 0;
+      return res.json({
+        data: rows.map(({ total_count, ...r }) => r),
+        pagination: { page, pageSize, total: totalCount, totalPages: Math.ceil(totalCount / pageSize) }
+      });
+    }
+
+    // ── Vendedora: ya está acotada por marca + no-en-inventario, devuelve lista plana ──
     const vendorQuery = `
       SELECT ${columnas}
       FROM catalogo_maestro cm
@@ -61,16 +130,6 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
         AND cm.estado = true
         AND iv.producto_maestro_id IS NULL;
     `;
-
-    if (esAdmin) {
-      const { rows } = await pool.query(adminQuery, [pageSize, offset]);
-      const totalCount = rows.length > 0 ? parseInt(rows[0].total_count) : 0;
-      return res.json({
-        data: rows.map(({ total_count, ...r }) => r),
-        pagination: { page, pageSize, total: totalCount, totalPages: Math.ceil(totalCount / pageSize) }
-      });
-    }
-
     const { rows } = await pool.query(vendorQuery, [vendorId, marcaId]);
     res.json(rows);
   } catch (error) {
