@@ -28,6 +28,12 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
   const marcaId = req.user?.marca_id;
   const esAdmin = req.user?.rol === 1;
 
+  // Paginación: evita cargar miles de filas (con imágenes Base64) de golpe.
+  // El admin puede tener 5k+ items; sin LIMIT se agota la RAM del proceso.
+  const page = Math.max(1, parseInt(req.query.page as string) || 1);
+  const pageSize = Math.min(100, parseInt(req.query.limit as string) || 100);
+  const offset = (page - 1) * pageSize;
+
   try {
     const columnas = `
       cm.id, cm.sku, cm.skus_anteriores, cm.nombre, cm.descripcion,
@@ -38,11 +44,12 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
     // El administrador ve TODO el catálogo maestro aprobado (para gestionarlo).
     // La vendedora ve solo las joyas aprobadas de su marca que aún no tiene.
     const adminQuery = `
-      SELECT ${columnas}
+      SELECT ${columnas}, COUNT(*) OVER() AS total_count
       FROM catalogo_maestro cm
       LEFT JOIN categorias c ON cm.categoria_id = c.id
       WHERE cm.estado = true
-      ORDER BY cm.nombre;
+      ORDER BY cm.nombre
+      LIMIT $1 OFFSET $2;
     `;
     const vendorQuery = `
       SELECT ${columnas}
@@ -55,9 +62,16 @@ export const exploreCatalog = async (req: AuthRequest, res: Response) => {
         AND iv.producto_maestro_id IS NULL;
     `;
 
-    const { rows } = esAdmin
-      ? await pool.query(adminQuery)
-      : await pool.query(vendorQuery, [vendorId, marcaId]);
+    if (esAdmin) {
+      const { rows } = await pool.query(adminQuery, [pageSize, offset]);
+      const totalCount = rows.length > 0 ? parseInt(rows[0].total_count) : 0;
+      return res.json({
+        data: rows.map(({ total_count, ...r }) => r),
+        pagination: { page, pageSize, total: totalCount, totalPages: Math.ceil(totalCount / pageSize) }
+      });
+    }
+
+    const { rows } = await pool.query(vendorQuery, [vendorId, marcaId]);
     res.json(rows);
   } catch (error) {
     console.error("Error en exploreCatalog:", error);
@@ -342,7 +356,9 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
   const marcaId = req.user?.marca_id;
   const vendorEmail = req.user?.email || 'Vendedor Anónimo';
-  const { nombre, sku, stock, precio_personalizado, imagen_custom } = req.body;
+  // imagen_url: URL pública de R2 obtenida tras subir la imagen con /uploads/presigned-url.
+  // Ya no se acepta Base64 — el archivo se sube directo a R2 desde el frontend.
+  const { nombre, sku, stock, precio_personalizado, imagen_url } = req.body;
 
   if (!nombre || !sku || stock === undefined || precio_personalizado === undefined) {
     return res.status(400).json({ error: 'Faltan datos para crear tu joya personalizada.' });
@@ -359,7 +375,7 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
          (sku, nombre, ruta_imagen, precio_sugerido, categoria_id, marca_id, estado, creado_por)
        VALUES ($1, $2, $3, $4, NULL, $5, false, $6)
        RETURNING id;`,
-      [sku, nombre, imagen_custom || null, precio_personalizado, marcaId, vendorId]
+      [sku, nombre, imagen_url || null, precio_personalizado, marcaId, vendorId]
     );
     const productoMaestroId = joya.rows[0].id;
 
@@ -387,7 +403,7 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
           <li><strong>Nombre de la pieza:</strong> ${nombre}</li>
           <li><strong>SKU asignado:</strong> ${sku}</li>
           <li><strong>Precio fijado:</strong> $${precio_personalizado}</li>
-          <li><strong>¿Subió fotografía?:</strong> ${imagen_custom ? 'Sí' : 'No'}</li>
+          <li><strong>¿Subió fotografía?:</strong> ${imagen_url ? 'Sí' : 'No'}</li>
         </ul>
       `
     }).catch(err => console.error("Error silencioso de Resend:", err));

@@ -62,14 +62,16 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     `;
 
     // 5. Últimas 5 ventas (para actividad reciente)
+    // ruta_imagen se excluye intencionalmente: almacena Base64 y no es necesaria
+    // para el widget de actividad. Cargarla 5 veces por cada refresh del dashboard
+    // supone un gasto de memoria innecesario.
     const ultimasVentasQuery = `
-      SELECT 
+      SELECT
         v.id,
         v.cantidad,
         v.precio_total::float8 as total,
         TO_CHAR(v.fecha, 'DD/MM/YYYY HH24:MI') as fecha,
-        cm.nombre as producto_nombre,
-        cm.ruta_imagen as imagen
+        cm.nombre as producto_nombre
       FROM ventas v
       INNER JOIN inventario_vendedor iv ON v.inventario_id = iv.id
       INNER JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
