@@ -255,6 +255,20 @@ export const deleteInventoryItem = async (req: AuthRequest, res: Response) => {
   try {
     await client.query('BEGIN');
 
+    // Validación: verificar si hay ventas asociadas a este ítem de inventario
+    const ventasCheck = await client.query(
+      `SELECT COUNT(*) as count FROM ventas WHERE inventario_id = $1;`,
+      [id]
+    );
+
+    const ventasCount = parseInt(ventasCheck.rows[0].count);
+    if (ventasCount > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: `No se puede eliminar esta joya porque tiene ${ventasCount} ${ventasCount === 1 ? 'venta' : 'ventas'} asociada${ventasCount === 1 ? '' : 's'}. El historial de ventas debe ser preservado.`
+      });
+    }
+
     const del = await client.query(
       `DELETE FROM inventario_vendedor
        WHERE id = $1 AND vendedor_id = $2
