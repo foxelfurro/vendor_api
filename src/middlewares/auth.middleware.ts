@@ -1,7 +1,16 @@
+/**
+ * @file auth.middleware.ts
+ * @description Middlewares de autenticación y autorización.
+ *
+ * - `verifyToken`  → Verifica la cookie JWT y adjunta el payload al objeto Request.
+ * - `isAdmin`      → Verifica que el usuario tenga rol de administrador (rol_id = 1).
+ * - `AuthRequest`  → Interfaz extendida de Request que incluye el campo `user`.
+ */
+
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 
-// Definimos la interfaz del Payload para que sea reutilizable
+/** Estructura del payload incluido en el JWT de la aplicación. */
 interface TokenPayload {
   user_id: string;
   email: string;

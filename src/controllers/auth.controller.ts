@@ -1,49 +1,88 @@
+/**
+ * @file auth.controller.ts
+ * @description Controlador de autenticación y gestión de cuentas.
+ *
+ * Endpoints que maneja:
+ *  - POST /auth/login          → Inicio de sesión con CAPTCHA Turnstile.
+ *  - GET  /auth/me             → Datos del usuario autenticado.
+ *  - POST /auth/register       → Registro de cuenta nueva (inactiva hasta pagar).
+ *  - POST /auth/forgot-password → Solicitud de recuperación de contraseña.
+ *  - POST /auth/reset-password  → Restablecimiento de contraseña con token.
+ *  - POST /auth/logout          → Cierre de sesión (borra la cookie JWT).
+ */
+
 import { Request, Response } from 'express';
 import { pool } from '../config/db';
 import jwt from 'jsonwebtoken';
 import { AuthRequest } from '../middlewares/auth.middleware';
-import bcrypt from 'bcrypt'; 
+import bcrypt from 'bcrypt';
 import crypto from 'crypto';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
+const resend = new Resend(process.env.RESEND_API_KEY);
 
-// 1. IMPORTACIÓN CORREGIDA: Usamos require directamente sobre una constante en minúsculas
-const conekta = require('conekta');
+// Los pagos ya NO se procesan aquí: se manejan en payments.controller.ts
+// mediante el Checkout alojado de Stripe.
 
-// Configuramos la llave usando la variable de entorno que ya limpiamos (sin comillas)
-conekta.api_key = process.env.CONEKTA_PRIVATE_KEY;
-conekta.locale = 'es';
+// --- FUNCIÓN DE AYUDA PARA VALIDAR CAPTCHA (Cloudflare Turnstile) ---
+const verifyCaptcha = async (token: string): Promise<boolean> => {
+  if (!token) return false;
+
+  const secret = process.env.TURNSTILE_SECRET_KEY;
+  if (!secret) {
+    console.error('Falta la variable de entorno TURNSTILE_SECRET_KEY.');
+    return false;
+  }
+
+  try {
+    const verifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
+
+    // URLSearchParams codifica correctamente el cuerpo (evita romper la petición
+    // si el token trae caracteres especiales).
+    const params = new URLSearchParams();
+    params.append('secret', secret);
+    params.append('response', token);
+
+    const response = await fetch(verifyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+    });
+    const data: any = await response.json();
+
+    if (data?.success !== true) {
+      // Cloudflare devuelve el motivo en "error-codes" (ej. invalid-input-secret,
+      // timeout-or-duplicate). Registrarlo facilita el diagnóstico.
+      console.error('Verificación de CAPTCHA fallida. error-codes:', data?.['error-codes']);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Error validando Captcha:', err);
+    return false;
+  }
+};
 
 export const login = async (req: Request, res: Response): Promise<any> => {
-  // 1. Recibimos el captcha_token desde el body (junto con email y password)
   const { email, password, captcha_token } = req.body;
 
-  // Validación inmediata: si no hay token, no hay acceso
   if (!captcha_token) {
     return res.status(400).json({ error: 'Falta la verificación de seguridad (CAPTCHA).' });
   }
 
   try {
-    // --- 🛡️ PASO A: VALIDACIÓN CON CLOUDFLARE ---
-    const verifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
-    
-    // Forzamos a que sean strings para que TypeScript esté feliz
-    const bodyParams = new URLSearchParams({
-      secret: String(process.env.TURNSTILE_SECRET_KEY || ''),
-      response: String(captcha_token),
-    });
+    // Valida el CAPTCHA antes de continuar
+    const isHuman = await verifyCaptcha(captcha_token);
+    if (!isHuman) {
+      return res.status(403).json({ error: 'Verificación de seguridad fallida.' });
+    }
 
-    const captchaResponse = await fetch(verifyUrl, {
-      method: 'POST',
-      body: bodyParams,
-    });
-
-    // --- 🔑 PASO B: LÓGICA DE LOGIN NORMAL (EL CADENERO) ---
     const query = `
-      SELECT u.id, u.marca_id, u.password_hash, u.suscripcion_fin, ur.rol_id AS rol
+      SELECT u.id, u.marca_id, u.email, u.password_hash, u.suscripcion_fin, u.suscripcion_estado,
+             ur.rol_id AS rol
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
-      WHERE u.email = $1 AND u.activo = true
+      WHERE LOWER(u.email) = LOWER($1)
     `;
     const { rows } = await pool.query(query, [email]);
 
@@ -53,52 +92,54 @@ export const login = async (req: Request, res: Response): Promise<any> => {
 
     const user = rows[0];
 
-    // EL CADENERO 🚨
-    if (user.suscripcion_fin) {
-      const ahora = new Date();
-      const fechaFin = new Date(user.suscripcion_fin);
-
-      if (fechaFin < ahora) {
-        return res.status(403).json({ 
-          error: 'Tu suscripción ha expirado. Por favor, renueva tu plan para acceder.' 
-        });
-      }
-    }
-
-    // Verificamos contraseña
+    // Se valida la contraseña antes de revelar cualquier estado de la cuenta.
     const validPassword = await bcrypt.compare(password, user.password_hash);
-    
     if (!validPassword) {
-        return res.status(401).json({ error: 'Credenciales incorrectas' });
+      return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
-// GENERACIÓN Y CONFIGURACIÓN DE COOKIE 
-const token = jwt.sign(
-      { user_id: user.id, rol: user.rol, marca_id: user.marca_id },
+    // Cuenta registrada pero sin suscripción pagada todavía.
+    // El acceso se determina solo con suscripcion_estado y suscripcion_fin.
+    if (user.suscripcion_estado === 'pendiente') {
+      return res.status(403).json({
+        error: 'Tu cuenta está registrada pero aún no tiene una suscripción activa. Completa tu pago para entrar.',
+        code: 'PENDING_SUBSCRIPTION',
+      });
+    }
+
+    // Suscripción vencida.
+    if (user.suscripcion_fin && new Date(user.suscripcion_fin) < new Date()) {
+      return res.status(403).json({
+        error: 'Tu suscripción ha expirado. Renueva tu plan para acceder.',
+        code: 'EXPIRED_SUBSCRIPTION',
+      });
+    }
+
+    // El email se incluye en el token porque algunos controladores lo leen de
+    // req.user (p. ej. la notificación de joya propia en addCustomToInventory).
+    const token = jwt.sign(
+      { user_id: user.id, email: user.email, rol: user.rol, marca_id: user.marca_id },
       process.env.JWT_SECRET as string,
       { expiresIn: '24h' }
     );
 
-    // Configuramos la cookie HttpOnly
-res.cookie('token', token, {
-  httpOnly: true,
-  secure: true,      // OBLIGATORIO: Porque ya usas HTTPS
-  sameSite: 'none',  // OBLIGATORIO: Para que la cookie viaje de api.qlatte.com a qlatte.com
-  maxAge: 24 * 60 * 60 * 1000, // 1 día
-  domain: '.qlatte.com' // EL PUNTO INICIAL ES CLAVE: une a la api y a la web
-});
-
-    
-    return res.json({ 
-      user: { 
-        id: user.id, 
-        rol: user.rol, 
-        marca_id: user.marca_id 
-      } 
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'none',
+      maxAge: 24 * 60 * 60 * 1000,
+      domain: '.qlatte.com',
     });
 
+    return res.json({
+      user: {
+        id: user.id,
+        rol: user.rol,
+        marca_id: user.marca_id,
+      },
+    });
   } catch (error) {
-    console.error(" ERROR EN EL LOGIN:", error);
+    console.error('ERROR EN EL LOGIN:', error);
     return res.status(500).json({ error: 'Error interno del servidor' });
   }
 };
@@ -107,189 +148,96 @@ export const getMe = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.user_id;
   try {
     const query = `
-      SELECT u.id, u.nombre, u.email, u.marca_id, u.suscripcion_fin, u.suscripcion_estado, ur.rol_id AS rol
+      SELECT u.id, u.nombre, u.email, u.marca_id, u.suscripcion_fin, u.suscripcion_estado, ur.rol_id AS rol,
+             u.store_slug, u.telefono, u.store_name, u.personalizacion
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
       WHERE u.id = $1
     `;
     const { rows } = await pool.query(query, [userId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
-    
+
     res.json(rows[0]);
   } catch (error) {
-    console.error("🔥 ERROR EN AUTH/ME:", error);
+    console.error('ERROR EN GET /me:', error);
     res.status(500).json({ error: 'Error al obtener datos del usuario' });
   }
 };
 
-export const subscribeAndCreateAccount = async (req: Request, res: Response) => {
-  const { token_id, nombre, email, password, captcha_token } = req.body;
-  
-  const isHuman = await verifyCaptcha(captcha_token);
-  if (!isHuman) {
-    return res.status(403).json({ success: false, error: 'Verificación de seguridad fallida.' });
+// =============================================================================
+// REGISTRO DE CUENTA  (paso 1 de 2 — SIN cobro)
+// -----------------------------------------------------------------------------
+// Crea la cuenta con suscripcion_estado = 'pendiente' (sin acceso hasta pagar).
+// El cobro de la suscripción es un paso aparte (payments.controller.ts), de modo
+// que si el pago no se concreta la cuenta no se pierde: la persona puede iniciar
+// el pago después con su correo y contraseña.
+// =============================================================================
+export const registerAccount = async (req: Request, res: Response): Promise<any> => {
+  const { nombre, email, password, telefono, marca_id, captcha_token } = req.body;
+
+  if (!nombre?.trim() || !email?.trim() || !password) {
+    return res.status(400).json({ error: 'Faltan datos obligatorios: nombre, correo y contraseña.' });
   }
-  
-  const client = await pool.connect();
 
-  try {
-    await client.query('BEGIN');
-
-    const userCheck = await client.query('SELECT id FROM usuarios WHERE email = $1', [email]);
-    if ((userCheck.rowCount ?? 0) > 0) {
-      throw new Error('Este correo ya está registrado.');
-    }
-
-    // 🚨 EL PARCHE SALVA-VIDAS: Si el nombre solo tiene una palabra, le agregamos "Joyería"
-    const nombreValido = nombre.trim().includes(' ') 
-      ? nombre.trim() 
-      : `${nombre.trim()} Joyeria`;
-
-    // 2. COBRO CON CONEKTA (Adaptado para la versión 3.x)
-    const orden: any = await new Promise((resolve, reject) => {
-      conekta.Order.create({
-        currency: "MXN",
-        customer_info: {
-          name: nombreValido, // <--- AQUÍ CAMBIAMOS 'nombre' POR 'nombreValido'
-          email: email,
-          phone: "+521000000000"
-        },
-        line_items: [{
-          name: "Licencia Vendor Hub",
-          unit_price: 29900, 
-          quantity: 1
-        }],
-        charges: [{
-          payment_method: { type: "card", token_id: token_id }
-        }]
-      }, function(err: any, res: any) {
-        if (err) {
-          reject(err); 
-        } else {
-          resolve(res); 
-        }
-      });
-    });
-
-    const saltRounds = 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
-    
-    // ... aquí sigue el resto de tu código normal (los INSERTS a tu base de datos)
-
-    // 1. CREAMOS EL USUARIO (Ya con su mes de suscripción incluido)
-    const insertUserQuery = `
-      INSERT INTO usuarios (
-        id, nombre, email, password_hash, marca_id, 
-        suscripcion_inicio, suscripcion_fin, suscripcion_estado
-      )
-      VALUES (
-        gen_random_uuid(), $1, $2, $3, $4, 
-        NOW(), NOW() + INTERVAL '1 month', 'activa'
-      )
-      RETURNING id;
-    `;
-    // Pasamos los 4 valores requeridos (el 1 es el marca_id por defecto)
-    const newUserResult = await client.query(insertUserQuery, [nombre, email, hashedPassword, 1]);
-    const newUserId = newUserResult.rows[0].id;
-
-    // 2. ASIGNAMOS EL ROL DE VENDEDOR (Rol 2)
-    const insertRoleQuery = `
-      INSERT INTO usuario_roles (usuario_id, rol_id)
-      VALUES ($1, $2);
-    `;
-    await client.query(insertRoleQuery, [newUserId, 2]);
-
-    await client.query('COMMIT');
-
-    res.status(200).json({
-      success: true,
-      message: '¡Bienvenido a Vendor Hub! Tu cuenta ha sido creada.',
-      user_id: newUserId,
-      orden_id: orden.id
-    });
-
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    console.error("🔥 ERROR DETALLADO:", error);
-    // Buscamos el mensaje de error de Conekta o el de la base de datos
-    const msg = error.details?.[0]?.message || error.message || "Error en el proceso";
-    res.status(400).json({ success: false, error: msg });
-  } finally {
-    client.release();
-  }
-  
-};
-// --- RENOVAR SUSCRIPCIÓN (Para usuarios vencidos) ---
-export const renewSubscription = async (req: Request, res: Response): Promise<any> => {
-  const { email, password, token_id, captcha_token } = req.body;
-  
   const isHuman = await verifyCaptcha(captcha_token);
   if (!isHuman) {
     return res.status(403).json({ error: 'Verificación de seguridad fallida.' });
   }
-  
-  const client = await pool.connect();
+
+  const correo = email.trim().toLowerCase();
 
   try {
-    await client.query('BEGIN');
-
-    // 1. Validamos que el usuario exista y la contraseña sea correcta
-    const userQuery = 'SELECT id, nombre, password_hash FROM usuarios WHERE email = $1';
-    const { rows } = await client.query(userQuery, [email]);
-
-    if (rows.length === 0) return res.status(404).json({ error: 'No existe una cuenta con este correo.' });
-    
-    const user = rows[0];
-    const validPassword = await bcrypt.compare(password, user.password_hash);
-    if (!validPassword) return res.status(401).json({ error: 'Contraseña incorrecta.' });
-
-    // 🚨 EL PARCHE: Arreglamos el nombre antes de mandarlo a Conekta
-    const nombreValidoRenovacion = user.nombre.trim().includes(' ') 
-      ? user.nombre.trim() 
-      : `${user.nombre.trim()} Joyeria`;
-
-    // 2. Cobramos con Conekta
-    const orden: any = await new Promise((resolve, reject) => {
-      conekta.Order.create({
-        currency: "MXN",
-        customer_info: { 
-          name: nombreValidoRenovacion, // <--- Usamos la variable parcheada
-          email: email, 
-          phone: "+521000000000" 
-        },
-        line_items: [{ name: "Renovación Mensual Vendor Hub", unit_price: 29900, quantity: 1 }],
-        charges: [{ payment_method: { type: "card", token_id: token_id } }]
-      }, (err: any, res: any) => {
-        if (err) reject(err); else resolve(res);
+    const existe = await pool.query('SELECT id FROM usuarios WHERE LOWER(email) = $1', [correo]);
+    if ((existe.rowCount ?? 0) > 0) {
+      return res.status(409).json({
+        error: 'Este correo ya está registrado. Inicia sesión o, si te falta pagar, completa tu suscripción.',
       });
-    });
+    }
 
-    // 3. Le sumamos 1 MES de tiempo a partir de HOY
-    const updateQuery = `
-      UPDATE usuarios 
-      SET suscripcion_fin = NOW() + INTERVAL '1 month', suscripcion_estado = 'activa'
-      WHERE id = $1
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const insertUserQuery = `
+      INSERT INTO usuarios (
+        id, nombre, email, password_hash, telefono, marca_id,
+        suscripcion_estado
+      )
+      VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, 'pendiente')
+      RETURNING id;
     `;
-    await client.query(updateQuery, [user.id]);
+    const result = await pool.query(insertUserQuery, [
+      nombre.trim(),
+      correo,
+      hashedPassword,
+      telefono?.trim() || null,
+      marca_id ?? 1,
+    ]);
+    const newUserId = result.rows[0].id;
 
-    await client.query('COMMIT');
-    return res.status(200).json({ success: true, message: '¡Tu suscripción ha sido renovada con éxito!' });
+    await pool.query(
+      'INSERT INTO usuario_roles (usuario_id, rol_id) VALUES ($1, $2)',
+      [newUserId, 2]
+    );
 
-  } catch (error: any) {
-    await client.query('ROLLBACK');
-    const msg = error.details?.[0]?.message || error.message || "Error al renovar.";
-    return res.status(400).json({ success: false, error: msg });
-  } finally {
-    client.release();
+    return res.status(201).json({
+      success: true,
+      message: 'Cuenta creada. El siguiente paso es activar tu suscripción.',
+      user_id: newUserId,
+      email: correo,
+    });
+  } catch (error) {
+    console.error('ERROR EN REGISTRO DE CUENTA:', error);
+    return res.status(500).json({ error: 'No pudimos crear tu cuenta. Intenta de nuevo en un momento.' });
   }
 };
 
-// --- 1. ENVIAR CORREO DE RECUPERACIÓN ---
+// --- ENVIAR CORREO DE RECUPERACIÓN ---
 export const forgotPassword = async (req: Request, res: Response): Promise<any> => {
   const { email } = req.body;
 
   try {
-    const queryUser = 'SELECT id, email FROM usuarios WHERE email = $1';
+    // LOWER en ambos lados: el correo se guarda en minúsculas al registrarse,
+    // así que la búsqueda no debe depender de cómo lo escriba la persona.
+    const queryUser = 'SELECT id, email FROM usuarios WHERE LOWER(email) = LOWER($1)';
     const { rows } = await pool.query(queryUser, [email]);
 
     if (rows.length === 0) {
@@ -298,37 +246,19 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
 
     const user = rows[0];
     const resetToken = crypto.randomBytes(20).toString('hex');
-    
+
     const updateQuery = `
-      UPDATE usuarios 
-      SET reset_password_token = $1, reset_password_expires = NOW() + INTERVAL '1 hour' 
+      UPDATE usuarios
+      SET reset_password_token = $1, reset_password_expires = NOW() + INTERVAL '1 hour'
       WHERE id = $2
     `;
     await pool.query(updateQuery, [resetToken, user.id]);
 
-    const transporter = nodemailer.createTransport({
-      host: process.env.EMAIL_HOST,
-      port: Number(process.env.EMAIL_PORT),
-      secure: false, // TLS
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-      tls: {
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1.2'
-      },
-      // Aumentamos los tiempos al máximo para que Render no tire la toalla
-      connectionTimeout: 20000, // 20 segundos para conectar
-      greetingTimeout: 20000,   // 20 segundos para el saludo SMTP
-      socketTimeout: 30000,     // 30 segundos de espera total
-    });
-
     const resetUrl = `https://lumin.qlatte.com/reset-password?token=${resetToken}`;
 
-    const mailOptions = {
-      from: `"Qlatte | Lumin" <${process.env.EMAIL_USER}>`,
-      to: user.email,
+    const { data, error } = await resend.emails.send({
+      from: 'Qlatte | Lumin <admin@qlatte.com>',
+      to: [user.email],
       subject: 'Recuperación de Contraseña - Qlatte Lumin',
       html: `
         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
@@ -338,89 +268,72 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
           <a href="${resetUrl}" style="background-color: #000; color: #fff; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-top: 15px; font-weight: bold;">Restablecer mi contraseña</a>
           <p style="margin-top: 30px; font-size: 12px; color: #666;">Si tú no solicitaste esto, puedes ignorar este correo de forma segura.</p>
         </div>
-      `
-    };
+      `,
+    });
 
-    await transporter.sendMail(mailOptions);
-      
-      // Si llega aquí, todo salió bien
-      return res.status(200).json({ message: "Correo enviado con éxito." });
-
-    } catch (error) {
-      console.error("Error detallado:", error);
-      
-      // SI FALLA EL CORREO, RESPONDEMOS UN 200 O 400, PERO NO DEJAMOS EL 500
-      return res.status(400).json({ 
-        message: "No pudimos enviar el correo en este momento, pero tu solicitud fue procesada. Inténtalo de nuevo en un minuto." 
+    if (error) {
+      console.error('Error de Resend:', error);
+      return res.status(400).json({
+        message:
+          'No pudimos enviar el correo en este momento, pero tu solicitud fue procesada. Inténtalo de nuevo en un minuto.',
       });
     }
+
+    return res.status(200).json({ message: 'Correo enviado con éxito.' });
+  } catch (error) {
+    console.error('Error detallado en DB o servidor:', error);
+    return res.status(400).json({
+      message: 'Ocurrió un error inesperado. Inténtalo de nuevo en un minuto.',
+    });
+  }
 };
 
-
-// --- 2. RESTABLECER LA CONTRASEÑA ---
+// --- RESTABLECER LA CONTRASEÑA ---
 export const resetPassword = async (req: Request, res: Response): Promise<any> => {
   const { token, newPassword } = req.body;
 
   try {
-    // Buscamos a un usuario que tenga ese token y que el token no haya expirado
     const query = `
-      SELECT id 
-      FROM usuarios 
+      SELECT id
+      FROM usuarios
       WHERE reset_password_token = $1 AND reset_password_expires > NOW()
     `;
     const { rows } = await pool.query(query, [token]);
 
     if (rows.length === 0) {
-      return res.status(400).json({ error: 'El código es inválido o ha expirado. Vuelve a solicitar la recuperación.' });
+      return res
+        .status(400)
+        .json({ error: 'El código es inválido o ha expirado. Vuelve a solicitar la recuperación.' });
     }
 
     const userId = rows[0].id;
 
-    // Encriptamos la nueva contraseña
     const saltRounds = 10;
     const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
 
-    // Actualizamos la contraseña y limpiamos el token para que no se pueda volver a usar
     const updateQuery = `
-      UPDATE usuarios 
-      SET password_hash = $1, reset_password_token = NULL, reset_password_expires = NULL 
+      UPDATE usuarios
+      SET password_hash = $1, reset_password_token = NULL, reset_password_expires = NULL
       WHERE id = $2
     `;
     await pool.query(updateQuery, [hashedPassword, userId]);
 
-    return res.status(200).json({ message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.' });
-
+    return res
+      .status(200)
+      .json({ message: 'Contraseña actualizada correctamente. Ya puedes iniciar sesión.' });
   } catch (error) {
     console.error('Error en resetPassword:', error);
     return res.status(500).json({ error: 'Error al actualizar la contraseña.' });
   }
 };
 
-// --- FUNCIÓN DE AYUDA PARA VALIDAR CAPTCHA ---
-const verifyCaptcha = async (token: string): Promise<boolean> => {
-  if (!token) return false;
-  try {
-    const verifyUrl = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
-    const response = await fetch(verifyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: `secret=${process.env.TURNSTILE_SECRET_KEY}&response=${token}`,
-    });
-    const data = await response.json();
-    return data.success === true;
-  } catch (err) {
-    console.error("🔥 Error validando Captcha:", err);
-    return false;
-  }
-};
-export const logout = (req: Request, res: Response) => {
-  // Para borrar una cookie, DEBES pasarle exactamente las mismas 
-  // opciones de seguridad con las que la creaste.
+// Cierre de sesión: elimina la cookie JWT del cliente
+export const logout = (req: Request, res: Response): void => {
   res.clearCookie('token', {
     httpOnly: true,
-    secure: true,      // Debe coincidir con cómo la creaste
-    sameSite: 'none'   // Debe coincidir con cómo la creaste
+    secure: true,
+    sameSite: 'none',
   });
 
-  return res.json({ message: 'Sesión cerrada con éxito' });
+  res.json({ message: 'Sesión cerrada con éxito' });
 };

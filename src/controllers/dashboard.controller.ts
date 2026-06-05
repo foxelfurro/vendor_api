@@ -1,3 +1,14 @@
+/**
+ * @file dashboard.controller.ts
+ * @description Controlador de estadísticas del panel de control del vendedor.
+ *
+ * Ejecuta múltiples consultas en paralelo para construir el payload de
+ * métricas que consume el componente Dashboard del frontend.
+ *
+ * Endpoint que maneja (requiere token válido):
+ *  - GET /vendor/dashboard-stats → KPIs, últimas ventas, gráficas y alertas.
+ */
+
 import { Response } from 'express';
 import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
@@ -7,19 +18,22 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
 
   try {
     // 1. Resumen general
+    // Los casts (::float8 / ::int) son importantes: sin ellos pg devuelve los
+    // agregados numeric/bigint como STRING, y el frontend (toLocaleString,
+    // gráficas) los necesita como número.
     const summaryQuery = `
-      SELECT 
-        COALESCE(SUM(precio_total), 0) as total_ingresos,
-        COALESCE(SUM(precio_total), 0) as valor_total_ventas,
-        COALESCE(SUM(cantidad), 0) as unidades_vendidas,
-        COUNT(id) as transacciones_totales
-      FROM ventas 
+      SELECT
+        COALESCE(SUM(precio_total), 0)::float8 as total_ingresos,
+        COALESCE(SUM(precio_total), 0)::float8 as valor_total_ventas,
+        COALESCE(SUM(cantidad), 0)::int as unidades_vendidas,
+        COUNT(id)::int as transacciones_totales
+      FROM ventas
       WHERE vendedor_id = $1;
     `;
 
     // 2. Alerta de stock bajo
     const lowStockQuery = `
-      SELECT COUNT(*) as productos_criticos
+      SELECT COUNT(*)::int as productos_criticos
       FROM inventario_vendedor
       WHERE vendedor_id = $1 AND stock < 5;
     `;
@@ -28,7 +42,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     const topProductsQuery = `
       SELECT 
         cm.nombre,
-        SUM(v.cantidad) as total_vendido
+        SUM(v.cantidad)::int as total_vendido
       FROM ventas v
       INNER JOIN inventario_vendedor iv ON v.inventario_id = iv.id
       INNER JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
@@ -41,18 +55,18 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     // 4. Estadísticas de inventario
     const inventoryQuery = `
       SELECT 
-        COALESCE(SUM(iv.stock), 0) as total_productos,
-        COALESCE(SUM(iv.stock * iv.precio_personalizado), 0) as valor_total
+        COALESCE(SUM(iv.stock), 0)::int as total_productos,
+        COALESCE(SUM(iv.stock * iv.precio_personalizado), 0)::float8 as valor_total
       FROM inventario_vendedor iv
       WHERE iv.vendedor_id = $1;
     `;
 
     // 5. Últimas 5 ventas (para actividad reciente)
     const ultimasVentasQuery = `
-      SELECT 
+      SELECT
         v.id,
         v.cantidad,
-        v.precio_total as total,
+        v.precio_total::float8 as total,
         TO_CHAR(v.fecha, 'DD/MM/YYYY HH24:MI') as fecha,
         cm.nombre as producto_nombre,
         cm.ruta_imagen as imagen
@@ -68,7 +82,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     const recentActivityQuery = `
       SELECT 
         TO_CHAR(fecha, 'DD Mon') as etiqueta,
-        COALESCE(SUM(precio_total), 0) as total
+        COALESCE(SUM(precio_total), 0)::float8 as total
       FROM ventas
       WHERE vendedor_id = $1 AND fecha >= CURRENT_DATE - INTERVAL '7 days'
       GROUP BY TO_CHAR(fecha, 'DD Mon'), DATE_TRUNC('day', fecha)
@@ -79,7 +93,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     const monthlyPerformanceQuery = `
       SELECT 
         TO_CHAR(fecha, 'Month') as mes,
-        COALESCE(SUM(precio_total), 0) as total
+        COALESCE(SUM(precio_total), 0)::float8 as total
       FROM ventas
       WHERE vendedor_id = $1 AND fecha >= DATE_TRUNC('year', CURRENT_DATE)
       GROUP BY TO_CHAR(fecha, 'Month'), DATE_TRUNC('month', fecha)
@@ -108,7 +122,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     });
 
   } catch (error) {
-    console.error("🔥 ERROR EN DASHBOARD STATS:", error);
+    console.error("Error en getDashboardStats:", error);
     res.status(500).json({ error: 'No se pudieron generar las estadísticas.' });
   }
 };
