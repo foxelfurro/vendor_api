@@ -16,7 +16,7 @@ const app = express();
 app.use(cookieParser());
 
 app.use(cors({
-  origin: ['https://lumin.qlatte.com', 'http://localhost:5173', 'https://api.qlatte.com'],
+  origin: ['https://lumin.qlatte.com', 'http://localhost:5173', 'https://api.qlatte.com', 'https://apidev.qlatte.com', 'https://clientdev.qlatte.com'],
   credentials: true,
 }));
 

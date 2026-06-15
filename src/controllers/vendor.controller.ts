@@ -329,6 +329,7 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
         iv.precio_personalizado,
         cm.id AS producto_maestro_id,
         cm.nombre AS nombre,
+        cm.sku AS sku,
         COALESCE(cm.descripcion, 'Pieza exclusiva de nuestra colección independiente.') AS descripcion,
         cm.ruta_imagen AS ruta_imagen,
         COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
