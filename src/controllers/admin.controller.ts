@@ -73,7 +73,7 @@ export const createCatalogItem = async (req: Request, res: Response) => {
             INSERT INTO catalogo_maestro
             (sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id, estado)
             VALUES ($1, $2, $3, $4, $5, $6, $7, true)
-            RETURNING *;
+            RETURNING id, sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id, estado, creado_en;
         `;
 
         const values = [sku, nombre, descripcion, precio_sugerido, ruta_imagen, categoria_id, marca_id];
