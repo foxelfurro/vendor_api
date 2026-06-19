@@ -117,6 +117,7 @@ export const getSalesHistory = async (req: AuthRequest, res: Response) => {
         v.fecha,
         cm.nombre AS producto_nombre,
         cm.sku,
+        cm.ruta_imagen,
         COUNT(*) OVER() AS total_count
       FROM ventas v
       INNER JOIN inventario_vendedor iv ON v.inventario_id = iv.id
