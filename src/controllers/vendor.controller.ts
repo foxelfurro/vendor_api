@@ -180,11 +180,31 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
   const { producto_maestro_id, stock, precio_personalizado } = req.body;
 
   try {
+    // Verificar que la joya pertenece a la marca del vendedor o fue creada por él mismo,
+    // para evitar que un vendedor agregue joyas de otra marca a su inventario.
+    const { rows: vendorRows } = await pool.query(
+      `SELECT marca_id FROM usuarios WHERE id = $1`,
+      [vendorId]
+    );
+    if (vendorRows.length === 0) {
+      return res.status(401).json({ error: 'Vendedor no encontrado.' });
+    }
+    const vendorMarcaId = vendorRows[0].marca_id;
+
+    const { rows: joyas } = await pool.query(
+      `SELECT id FROM catalogo_maestro
+       WHERE id = $1 AND (marca_id = $2 OR creado_por = $3)`,
+      [producto_maestro_id, vendorMarcaId, vendorId]
+    );
+    if (joyas.length === 0) {
+      return res.status(403).json({ error: 'No tienes permiso para agregar esta joya a tu inventario.' });
+    }
+
     const query = `
       WITH nuevo_item AS (
-        INSERT INTO inventario_vendedor 
+        INSERT INTO inventario_vendedor
           (vendedor_id, producto_maestro_id, stock, precio_personalizado)
-        VALUES 
+        VALUES
           ($1, $2, $3, $4)
         RETURNING *
       )
@@ -192,18 +212,18 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
       FROM nuevo_item ni
       JOIN catalogo_maestro cm ON ni.producto_maestro_id = cm.id;
     `;
-    
+
     const values = [vendorId, producto_maestro_id, stock, precio_personalizado];
     const { rows } = await pool.query(query, values);
-    
+
     res.status(201).json({
       message: '¡Producto agregado a tu inventario exitosamente!',
       producto: rows[0]
     });
   } catch (error: any) {
     if (error.code === '23505') {
-      return res.status(409).json({ 
-        error: 'Esta joya ya está en tu inventario. Ve a la pestaña de "Inventario" para actualizar el stock.' 
+      return res.status(409).json({
+        error: 'Esta joya ya está en tu inventario. Ve a la pestaña de "Inventario" para actualizar el stock.'
       });
     }
     console.error("Error en addToInventory:", error);

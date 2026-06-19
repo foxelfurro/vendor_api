@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
 
 import { verifyToken, isAdmin } from './middlewares/auth.middleware';
 import { login, logout, getMe, registerAccount, forgotPassword, resetPassword } from './controllers/auth.controller';
@@ -34,12 +35,21 @@ app.use(express.urlencoded({ limit: '1mb', extended: true }));
 // a R2 con esa URL y luego envía la URL pública al endpoint que la necesite.
 app.post('/uploads/presigned-url', verifyToken, getPresignedUploadUrl);
 
+// ─── RATE LIMITING ───────────────────────────────────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // ventana de 15 minutos
+  max: 10,                   // máximo 10 intentos por IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados intentos. Espera 15 minutos e inténtalo de nuevo.' },
+});
+
 // ─── RUTAS PÚBLICAS ──────────────────────────────────────────────────────────
-app.post('/auth/login', login);
+app.post('/auth/login', authLimiter, login);
 app.post('/auth/logout', logout);
-app.post('/auth/forgot-password', forgotPassword);
-app.post('/auth/reset-password', resetPassword);
-app.post('/auth/register', registerAccount);
+app.post('/auth/forgot-password', authLimiter, forgotPassword);
+app.post('/auth/reset-password', authLimiter, resetPassword);
+app.post('/auth/register', authLimiter, registerAccount);
 app.get('/store/:slug', getSellerCatalogBySlug);
 
 // ─── PAGOS (Stripe) ──────────────────────────────────────────────────────────
