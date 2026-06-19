@@ -240,8 +240,12 @@ export const forgotPassword = async (req: Request, res: Response): Promise<any> 
     const queryUser = 'SELECT id, email FROM usuarios WHERE LOWER(email) = LOWER($1)';
     const { rows } = await pool.query(queryUser, [email]);
 
+    // Respuesta genérica independientemente de si el correo existe o no,
+    // para evitar user enumeration (confirmar qué emails están registrados).
     if (rows.length === 0) {
-      return res.status(404).json({ error: 'No existe una cuenta con este correo.' });
+      return res.status(200).json({
+        message: 'Si existe una cuenta con ese correo, recibirás un enlace en breve.',
+      });
     }
 
     const user = rows[0];
