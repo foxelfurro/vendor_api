@@ -74,7 +74,33 @@ export const registerSale = async (req: AuthRequest, res: Response): Promise<any
   }
 };
 
-// --- 2. OBTENER HISTORIAL DE VENTAS ---
+// --- 2. EXPORTAR HISTORIAL COMPLETO (sin paginación) ---
+export const exportSalesHistory = async (req: AuthRequest, res: Response) => {
+  const vendorId = req.user?.user_id;
+  try {
+    const query = `
+      SELECT
+        v.id AS venta_id,
+        v.cantidad,
+        v.precio_total,
+        v.fecha,
+        cm.nombre AS producto_nombre,
+        cm.sku
+      FROM ventas v
+      INNER JOIN inventario_vendedor iv ON v.inventario_id = iv.id
+      INNER JOIN catalogo_maestro cm ON iv.producto_maestro_id = cm.id
+      WHERE v.vendedor_id = $1
+      ORDER BY v.fecha DESC;
+    `;
+    const { rows } = await pool.query(query, [vendorId]);
+    res.json(rows);
+  } catch (error) {
+    console.error('Error en exportSalesHistory:', error);
+    res.status(500).json({ error: 'No se pudo exportar el historial de ventas.' });
+  }
+};
+
+// --- 3. OBTENER HISTORIAL DE VENTAS ---
 // El joyero usa esto para ver su panel de "Ventas de la semana/mes"
 export const getSalesHistory = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;

@@ -518,3 +518,18 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
     client.release();
   }
 };
+
+// --- CONTEO DE ALERTAS DE STOCK BAJO (para badge en sidebar) ---
+export const getStockAlerts = async (req: AuthRequest, res: Response) => {
+  const vendorId = req.user?.user_id;
+  try {
+    const { rows } = await pool.query(
+      `SELECT COUNT(*)::int AS count FROM inventario_vendedor WHERE vendedor_id = $1 AND stock > 0 AND stock <= 3`,
+      [vendorId]
+    );
+    res.json({ count: rows[0].count });
+  } catch (error) {
+    console.error('Error en getStockAlerts:', error);
+    res.status(500).json({ error: 'No se pudo obtener las alertas de stock.' });
+  }
+};

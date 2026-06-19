@@ -6,8 +6,8 @@ import rateLimit from 'express-rate-limit';
 import { verifyToken, isAdmin } from './middlewares/auth.middleware';
 import { login, logout, getMe, registerAccount, forgotPassword, resetPassword } from './controllers/auth.controller';
 import { crearCheckout, estadoPago, webhookStripe, crearPortalAutenticado } from './controllers/payments.controller';
-import { getSalesHistory, registerSale } from './controllers/sales.controller';
-import { exploreCatalog, getInventory, addToInventory, updateInventoryItem, deleteInventoryItem, getSellerCatalogBySlug, updateStoreSettings, addCustomToInventory } from './controllers/vendor.controller';
+import { getSalesHistory, registerSale, exportSalesHistory } from './controllers/sales.controller';
+import { exploreCatalog, getInventory, addToInventory, updateInventoryItem, deleteInventoryItem, getSellerCatalogBySlug, updateStoreSettings, addCustomToInventory, getStockAlerts } from './controllers/vendor.controller';
 import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem, getCategorias, getPendingItems, updateCatalogItem, approveCatalogItem, rejectCatalogItem } from './controllers/admin.controller';
 import { getPresignedUploadUrl } from './controllers/uploads.controller';
@@ -68,6 +68,7 @@ app.delete('/admin/catalogo/:id', verifyToken, isAdmin, rejectCatalogItem);
 
 // ─── VENDEDOR ────────────────────────────────────────────────────────────────
 app.get('/vendor/explore', verifyToken, exploreCatalog);
+app.get('/vendor/stock-alerts', verifyToken, getStockAlerts);
 app.get('/vendor/inventory', verifyToken, getInventory);
 app.put('/vendor/inventory/:id', verifyToken, updateInventoryItem);
 app.delete('/vendor/inventory/:id', verifyToken, deleteInventoryItem);
@@ -79,6 +80,7 @@ app.put('/vendor/store-settings', verifyToken, updateStoreSettings);
 // ─── VENTAS ──────────────────────────────────────────────────────────────────
 app.post('/sales/register', verifyToken, registerSale);
 app.get('/sales/history', verifyToken, getSalesHistory);
+app.get('/sales/export', verifyToken, exportSalesHistory);
 
 // ─── PERFIL ──────────────────────────────────────────────────────────────────
 app.get('/auth/me', verifyToken, getMe);
