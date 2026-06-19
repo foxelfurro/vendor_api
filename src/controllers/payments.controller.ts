@@ -219,9 +219,21 @@ export const crearPortalAutenticado = async (req: AuthRequest, res: Response): P
 
 // =============================================================================
 // GET /payments/estado/:pagoId  — la página de retorno consulta el estado aquí
+// -----------------------------------------------------------------------------
+// Este endpoint permanece público porque se llama desde /pago/resultado justo
+// después de que Stripe redirige al usuario, antes de que exista una sesión JWT.
+// El pagoId es un UUID v4 (122 bits de entropía), prácticamente no enumerable;
+// se valida el formato para rechazar cualquier consulta con IDs malformados.
 // =============================================================================
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const estadoPago = async (req: Request, res: Response): Promise<any> => {
   const { pagoId } = req.params;
+
+  if (!UUID_RE.test(pagoId)) {
+    return res.status(400).json({ error: 'ID de pago inválido.' });
+  }
+
   try {
     const { rows } = await pool.query(
       `SELECT estado, tipo, metodo, recurrente FROM pagos WHERE id = $1`,
