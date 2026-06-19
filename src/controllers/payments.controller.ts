@@ -158,11 +158,7 @@ export const crearCheckout = async (req: Request, res: Response): Promise<any> =
       mode: 'subscription',
       ...customerParam,
       line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
-      // Ambos parámetros llevan el id interno del pago (no el id de la sesión
-      // de Stripe); la página de retorno lo usa para consultar /payments/estado.
-      // Se envían los dos nombres (`pago_id` actual y `session_id` anterior)
-      // para que la página funcione sin importar el orden en que se desplieguen
-      // backend y frontend.
+      allow_promotion_codes: true,
       success_url: `${FRONTEND_URL}/pago/resultado?pago_id=${pagoId}&session_id=${pagoId}`,
       cancel_url: `${FRONTEND_URL}/suscripcion`,
       // Metadatos para poder conciliar en el webhook.

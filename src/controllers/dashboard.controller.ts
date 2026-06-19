@@ -91,7 +91,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
 
     // 7. Ventas mensuales del año actual
     const monthlyPerformanceQuery = `
-      SELECT 
+      SELECT
         TO_CHAR(fecha, 'Month') as mes,
         COALESCE(SUM(precio_total), 0)::float8 as total
       FROM ventas
@@ -100,15 +100,27 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       ORDER BY DATE_TRUNC('month', fecha) ASC;
     `;
 
+    // 8. Ventas totales por año
+    const yearlyPerformanceQuery = `
+      SELECT
+        EXTRACT(YEAR FROM fecha)::int AS anio,
+        COALESCE(SUM(precio_total), 0)::float8 AS total
+      FROM ventas
+      WHERE vendedor_id = $1
+      GROUP BY EXTRACT(YEAR FROM fecha)
+      ORDER BY anio ASC;
+    `;
+
     // Ejecutar todas las consultas
-    const [summary, lowStock, topProducts, inventory, ultimasVentas, recent, monthly] = await Promise.all([
+    const [summary, lowStock, topProducts, inventory, ultimasVentas, recent, monthly, yearly] = await Promise.all([
       pool.query(summaryQuery, [vendorId]),
       pool.query(lowStockQuery, [vendorId]),
       pool.query(topProductsQuery, [vendorId]),
       pool.query(inventoryQuery, [vendorId]),
       pool.query(ultimasVentasQuery, [vendorId]),
       pool.query(recentActivityQuery, [vendorId]),
-      pool.query(monthlyPerformanceQuery, [vendorId])
+      pool.query(monthlyPerformanceQuery, [vendorId]),
+      pool.query(yearlyPerformanceQuery, [vendorId]),
     ]);
 
     res.json({
@@ -116,9 +128,10 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       alertas: lowStock.rows[0],
       top_productos: topProducts.rows,
       inventario: inventory.rows[0],
-      ultimas_ventas: ultimasVentas.rows,   // ← nuevo
+      ultimas_ventas: ultimasVentas.rows,
       grafica_reciente: recent.rows,
-      grafica_mensual: monthly.rows
+      grafica_mensual: monthly.rows,
+      grafica_anual: yearly.rows,
     });
 
   } catch (error) {
