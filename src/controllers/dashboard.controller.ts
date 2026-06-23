@@ -26,7 +26,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         COALESCE(SUM(precio_total), 0)::float8 as total_ingresos,
         COALESCE(SUM(precio_total), 0)::float8 as valor_total_ventas,
         COALESCE(SUM(cantidad), 0)::int as unidades_vendidas,
-        COUNT(id)::int as transacciones_totales
+        COUNT(id)::int as transacciones_totales,
+        COALESCE(SUM(CASE WHEN DATE(fecha) = CURRENT_DATE THEN cantidad ELSE 0 END), 0)::int as joyas_vendidas_hoy
       FROM ventas
       WHERE vendedor_id = $1;
     `;
