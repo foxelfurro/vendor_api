@@ -15,6 +15,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1054.0",
     "@aws-sdk/s3-request-presigner": "^3.1054.0",
+    "@neondatabase/serverless": "^1.1.0",
     "@types/bcrypt": "^6.0.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
@@ -31,7 +32,7 @@
     "express-rate-limit": "^8.5.2",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^8.0.4",
-    "pg": "^8.20.0",
+    "pg": "^8.23.0",
     "resend": "^6.12.3",
     "stripe": "^22.1.1",
     "typescript": "^5.9.3"
