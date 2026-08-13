@@ -16,14 +16,13 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 // --- 1. REGISTRAR VENTA (Solo control de inventario) ---
 // El joyero usa esto para decir "Hoy vendí esta joya, descuéntala de mi stock"
 export const registerSale = async (req: AuthRequest, res: Response): Promise<any> => {
-  const { inventario_id, cantidad, precio_unitario } = req.body;
+  const { inventario_id, cantidad, precio_unitario, clienta_id, anticipo } = req.body;
   const vendorId = req.user?.user_id;
 
-  // Validación de entrada. Sin ella, una cantidad negativa o cero AUMENTARÍA el
-  // stock (stock - cantidad) y dejaría registrada una venta inválida; un precio
-  // no numérico produciría un total NaN.
   const cant = Number(cantidad);
   const precio = Number(precio_unitario);
+  const anticipoNum = Number(anticipo) || 0;
+  
   if (!inventario_id || !Number.isInteger(cant) || cant <= 0) {
     return res.status(400).json({ error: 'La cantidad debe ser un número entero mayor que cero.' });
   }
@@ -49,14 +48,37 @@ export const registerSale = async (req: AuthRequest, res: Response): Promise<any
       throw new Error('No hay stock suficiente o el producto no pertenece a tu inventario.');
     }
 
-    // 2. Registramos el movimiento para sus reportes
+    // 2. Registramos el movimiento
     const precioTotal = cant * precio;
+    let estadoPago = 'PAGADO';
+    let saldoRestante = 0;
+
+    // Lógica de Abonos
+    if (clienta_id && anticipoNum < precioTotal) {
+      estadoPago = 'EN_ABONOS';
+      saldoRestante = precioTotal - anticipoNum;
+    }
+
     const insertSaleQuery = `
-      INSERT INTO ventas (vendedor_id, inventario_id, cantidad, precio_total, fecha)
-      VALUES ($1, $2, $3, $4, NOW())
+      INSERT INTO ventas (vendedor_id, inventario_id, cantidad, precio_total, clienta_id, estado_pago, saldo_restante, fecha)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
       RETURNING id;
     `;
-    await client.query(insertSaleQuery, [vendorId, inventario_id, cant, precioTotal]);
+    const saleRes = await client.query(insertSaleQuery, [vendorId, inventario_id, cant, precioTotal, clienta_id || null, estadoPago, saldoRestante]);
+    const nuevaVentaId = saleRes.rows[0].id;
+
+    // 3. Si hay anticipo y es en abonos, registrar primer abono
+    if (estadoPago === 'EN_ABONOS' && anticipoNum > 0) {
+      await client.query(`INSERT INTO abonos (venta_id, monto) VALUES ($1, $2)`, [nuevaVentaId, anticipoNum]);
+    }
+
+    // 4. Actualizar saldo global de la clienta
+    if (clienta_id && saldoRestante > 0) {
+      await client.query(
+        `UPDATE clientas SET saldo_pendiente = saldo_pendiente + $1 WHERE id = $2`, 
+        [saldoRestante, clienta_id]
+      );
+    }
 
     await client.query('COMMIT');
 
