@@ -113,8 +113,16 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       ORDER BY anio ASC;
     `;
 
+    // 9. Cobros pendientes para hoy o vencidos
+    const cobrosHoyQuery = `
+      SELECT id, nombre, telefono, saldo_pendiente::float8 as deuda, fecha_proximo_pago 
+      FROM clientas 
+      WHERE vendedor_id = $1 AND saldo_pendiente > 0 AND fecha_proximo_pago <= CURRENT_DATE
+      ORDER BY fecha_proximo_pago ASC;
+    `;
+
     // Ejecutar todas las consultas
-    const [summary, lowStock, topProducts, inventory, ultimasVentas, recent, monthly, yearly] = await Promise.all([
+    const [summary, lowStock, topProducts, inventory, ultimasVentas, recent, monthly, yearly, cobros] = await Promise.all([
       pool.query(summaryQuery, [vendorId]),
       pool.query(lowStockQuery, [vendorId]),
       pool.query(topProductsQuery, [vendorId]),
@@ -123,6 +131,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       pool.query(recentActivityQuery, [vendorId]),
       pool.query(monthlyPerformanceQuery, [vendorId]),
       pool.query(yearlyPerformanceQuery, [vendorId]),
+      pool.query(cobrosHoyQuery, [vendorId]),
     ]);
 
     res.json({
@@ -134,6 +143,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
       grafica_reciente: recent.rows,
       grafica_mensual: monthly.rows,
       grafica_anual: yearly.rows,
+      cobros_hoy: cobros.rows,
     });
 
   } catch (error) {
