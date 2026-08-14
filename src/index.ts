@@ -12,6 +12,9 @@ import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem, getCategorias, getPendingItems, updateCatalogItem, approveCatalogItem, rejectCatalogItem } from './controllers/admin.controller';
 import { getClientas, createClienta, getClientaDetalle, registerAbono, updateClienta, deleteClienta, getCobrosHoyCount } from './controllers/clientas.controller';
 import { getPresignedUploadUrl } from './controllers/uploads.controller';
+import { getVapidPublicKey, subscribeToPush } from './controllers/push.controller';
+import { startPushCron } from './cron/pushCron';
+import webpush from 'web-push';
 
 const app = express();
 
@@ -31,10 +34,27 @@ app.post('/webhooks/stripe', express.raw({ type: 'application/json' }), webhookS
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
-// ─── SUBIDA DE ARCHIVOS ──────────────────────────────────────────────────────
+// ─── CONFIGURACIÓN DE WEB PUSH ───────────────────────────────────────────────
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BOeStfB8mHs00pAkKgnThLDf9dMcpMhpV9YqmayP-i8wGBur0MdQ7xdFUYVPoXuq_OepFr0axaZvXzPRXRxpeic';
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || 'FWPZC6O7eo_7R6euygivLncR48FPJOeNPnjvK9HFwCo';
+
+webpush.setVapidDetails(
+  'mailto:admin@qlatte.com',
+  VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY
+);
+
+// ─── CRON JOBS ───────────────────────────────────────────────────────────────
+startPushCron();
+
+// ─── RUTAS PÚBLICAS ──────────────────────────────────────────────────────────
 // Genera una URL prefirmada de R2. El frontend sube la imagen directamente
 // a R2 con esa URL y luego envía la URL pública al endpoint que la necesite.
 app.post('/uploads/presigned-url', verifyToken, getPresignedUploadUrl);
+
+// ─── NOTIFICACIONES PUSH ─────────────────────────────────────────────────────
+app.get('/push/vapid-public-key', getVapidPublicKey);
+app.post('/push/subscribe', verifyToken, subscribeToPush);
 
 // ─── RATE LIMITING ───────────────────────────────────────────────────────────
 const authLimiter = rateLimit({
