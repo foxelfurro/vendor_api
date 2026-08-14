@@ -16,7 +16,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 // --- 1. REGISTRAR VENTA (Solo control de inventario) ---
 // El joyero usa esto para decir "Hoy vendí esta joya, descuéntala de mi stock"
 export const registerSale = async (req: AuthRequest, res: Response): Promise<any> => {
-  const { inventario_id, cantidad, precio_unitario, clienta_id, anticipo } = req.body;
+  const { inventario_id, cantidad, precio_unitario, clienta_id, anticipo, fecha_proximo_pago } = req.body;
   const vendorId = req.user?.user_id;
 
   const cant = Number(cantidad);
@@ -81,11 +81,11 @@ export const registerSale = async (req: AuthRequest, res: Response): Promise<any
       await client.query(`INSERT INTO abonos (venta_id, monto) VALUES ($1, $2)`, [nuevaVentaId, anticipoNum]);
     }
 
-    // 4. Actualizar saldo global de la clienta
-    if (clienta_id && saldoRestante > 0) {
+    // 4. Actualizar saldo global de la clienta y fecha de próximo pago
+    if (clienta_id) {
       await client.query(
-        `UPDATE clientas SET saldo_pendiente = saldo_pendiente + $1 WHERE id = $2`, 
-        [saldoRestante, clienta_id]
+        `UPDATE clientas SET saldo_pendiente = saldo_pendiente + $1, fecha_proximo_pago = COALESCE($2, fecha_proximo_pago) WHERE id = $3`, 
+        [saldoRestante, fecha_proximo_pago || null, clienta_id]
       );
     }
 

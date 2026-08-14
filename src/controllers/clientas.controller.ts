@@ -8,7 +8,7 @@ export const getClientas = async (req: AuthRequest, res: Response) => {
 
   try {
     const query = `
-      SELECT id, nombre, telefono, detalles, saldo_pendiente, created_at 
+      SELECT id, nombre, telefono, detalles, saldo_pendiente, fecha_proximo_pago, created_at 
       FROM clientas 
       WHERE vendedor_id = $1 
       ORDER BY nombre ASC
@@ -41,6 +41,31 @@ export const createClienta = async (req: AuthRequest, res: Response): Promise<an
   } catch (error) {
     console.error('Error en createClienta:', error);
     res.status(500).json({ error: 'Error al crear la clienta' });
+  }
+};
+
+// --- 2.5 ACTUALIZAR CLIENTA ---
+export const updateClienta = async (req: AuthRequest, res: Response): Promise<any> => {
+  const vendorId = req.user?.user_id;
+  const { id } = req.params;
+  const { nombre, telefono, detalles, fecha_proximo_pago } = req.body;
+
+  try {
+    const query = `
+      UPDATE clientas 
+      SET nombre = COALESCE($1, nombre),
+          telefono = COALESCE($2, telefono),
+          detalles = COALESCE($3, detalles),
+          fecha_proximo_pago = $4
+      WHERE id = $5 AND vendedor_id = $6
+      RETURNING *
+    `;
+    const { rows } = await pool.query(query, [nombre, telefono, detalles || {}, fecha_proximo_pago || null, id, vendorId]);
+    if (rows.length === 0) return res.status(404).json({ error: 'Clienta no encontrada' });
+    res.json(rows[0]);
+  } catch (error) {
+    console.error('Error en updateClienta:', error);
+    res.status(500).json({ error: 'Error al actualizar clienta' });
   }
 };
 
