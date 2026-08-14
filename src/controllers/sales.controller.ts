@@ -54,9 +54,18 @@ export const registerSale = async (req: AuthRequest, res: Response): Promise<any
     let saldoRestante = 0;
 
     // Lógica de Abonos
-    if (clienta_id && anticipoNum < precioTotal) {
-      estadoPago = 'EN_ABONOS';
-      saldoRestante = precioTotal - anticipoNum;
+    if (clienta_id && anticipoNum > 0) {
+      if (anticipoNum > precioTotal) {
+        throw new Error(`El anticipo no puede ser mayor al total de la venta ($${precioTotal}).`);
+      }
+      
+      if (anticipoNum < precioTotal) {
+        estadoPago = 'EN_ABONOS';
+        saldoRestante = precioTotal - anticipoNum;
+      } else {
+        estadoPago = 'PAGADO';
+        saldoRestante = 0;
+      }
     }
 
     const insertSaleQuery = `
@@ -67,8 +76,8 @@ export const registerSale = async (req: AuthRequest, res: Response): Promise<any
     const saleRes = await client.query(insertSaleQuery, [vendorId, inventario_id, cant, precioTotal, clienta_id || null, estadoPago, saldoRestante]);
     const nuevaVentaId = saleRes.rows[0].id;
 
-    // 3. Si hay anticipo y es en abonos, registrar primer abono
-    if (estadoPago === 'EN_ABONOS' && anticipoNum > 0) {
+    // 3. Si hay anticipo, registrar primer abono independientemente si se pagó total o parcial
+    if (clienta_id && anticipoNum > 0) {
       await client.query(`INSERT INTO abonos (venta_id, monto) VALUES ($1, $2)`, [nuevaVentaId, anticipoNum]);
     }
 
