@@ -10,7 +10,7 @@ import { getSalesHistory, registerSale, exportSalesHistory } from './controllers
 import { exploreCatalog, getInventory, addToInventory, updateInventoryItem, deleteInventoryItem, getSellerCatalogBySlug, updateStoreSettings, addCustomToInventory, getStockAlerts } from './controllers/vendor.controller';
 import { getDashboardStats } from './controllers/dashboard.controller';
 import { createUser, createCatalogItem, getCategorias, getPendingItems, updateCatalogItem, approveCatalogItem, rejectCatalogItem } from './controllers/admin.controller';
-import { getClientas, createClienta, getClientaDetalle, registerAbono, updateClienta } from './controllers/clientas.controller';
+import { getClientas, createClienta, getClientaDetalle, registerAbono, updateClienta, deleteClienta, getCobrosHoyCount } from './controllers/clientas.controller';
 import { getPresignedUploadUrl } from './controllers/uploads.controller';
 
 const app = express();
@@ -85,9 +85,11 @@ app.get('/sales/export', verifyToken, exportSalesHistory);
 app.post('/sales/abonos', verifyToken, registerAbono);
 
 // ─── CLIENTAS ────────────────────────────────────────────────────────────────
+app.get('/clientas/alertas/cobros-hoy', verifyToken, getCobrosHoyCount);
 app.get('/clientas', verifyToken, getClientas);
 app.post('/clientas', verifyToken, createClienta);
 app.put('/clientas/:id', verifyToken, updateClienta);
+app.delete('/clientas/:id', verifyToken, deleteClienta);
 app.get('/clientas/:id', verifyToken, getClientaDetalle);
 
 // ─── PERFIL ──────────────────────────────────────────────────────────────────

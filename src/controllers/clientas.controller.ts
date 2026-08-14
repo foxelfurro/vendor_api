@@ -69,6 +69,54 @@ export const updateClienta = async (req: AuthRequest, res: Response): Promise<an
   }
 };
 
+// --- 2.6 ELIMINAR CLIENTA ---
+export const deleteClienta = async (req: AuthRequest, res: Response): Promise<any> => {
+  const vendorId = req.user?.user_id;
+  const { id } = req.params;
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    const clientaRes = await client.query('SELECT saldo_pendiente FROM clientas WHERE id = $1 AND vendedor_id = $2', [id, vendorId]);
+    if (clientaRes.rowCount === 0) throw new Error('Clienta no encontrada');
+    
+    if (Number(clientaRes.rows[0].saldo_pendiente) > 0) {
+       throw new Error('No puedes eliminar a una clienta que tiene saldo pendiente. Debe liquidar su deuda primero.');
+    }
+
+    // Desvincular ventas para no borrar el historial contable
+    await client.query('UPDATE ventas SET clienta_id = NULL WHERE clienta_id = $1', [id]);
+    
+    await client.query('DELETE FROM clientas WHERE id = $1', [id]);
+    
+    await client.query('COMMIT');
+    res.json({ message: 'Clienta eliminada correctamente' });
+  } catch (error: any) {
+    await client.query('ROLLBACK');
+    console.error('Error en deleteClienta:', error);
+    res.status(400).json({ error: error.message || 'Error al eliminar clienta' });
+  } finally {
+    client.release();
+  }
+};
+
+// --- 2.7 OBTENER ALERTAS DE COBROS DE HOY ---
+export const getCobrosHoyCount = async (req: AuthRequest, res: Response): Promise<any> => {
+  const vendorId = req.user?.user_id;
+  try {
+    const query = `
+      SELECT COUNT(id)::int as count 
+      FROM clientas 
+      WHERE vendedor_id = $1 AND saldo_pendiente > 0 AND fecha_proximo_pago <= CURRENT_DATE;
+    `;
+    const { rows } = await pool.query(query, [vendorId]);
+    res.json({ count: rows[0].count });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al cargar cobros' });
+  }
+};
+
 // --- 3. REGISTRAR UN ABONO ---
 export const registerAbono = async (req: AuthRequest, res: Response): Promise<any> => {
   const vendorId = req.user?.user_id;
