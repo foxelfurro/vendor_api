@@ -16,7 +16,7 @@ import { AuthRequest } from '../middlewares/auth.middleware';
 // --- 1. REGISTRAR VENTA (Solo control de inventario) ---
 // El joyero usa esto para decir "Hoy vendí esta joya, descuéntala de mi stock"
 export const registerSale = async (req: AuthRequest, res: Response): Promise<any> => {
-  const { inventario_id, cantidad, precio_unitario, clienta_id, anticipo, fecha_proximo_pago } = req.body;
+  const { inventario_id, cantidad, precio_unitario, clienta_id, anticipo, fecha_proximo_pago, en_abonos } = req.body;
   const vendorId = req.user?.user_id;
 
   const cant = Number(cantidad);
@@ -54,7 +54,7 @@ export const registerSale = async (req: AuthRequest, res: Response): Promise<any
     let saldoRestante = 0;
 
     // Lógica de Abonos
-    if (clienta_id && anticipoNum > 0) {
+    if (clienta_id && en_abonos) {
       if (anticipoNum > precioTotal) {
         throw new Error(`El anticipo no puede ser mayor al total de la venta ($${precioTotal}).`);
       }
