@@ -183,13 +183,21 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
     // Verificar que la joya pertenece a la marca del vendedor o fue creada por él mismo,
     // para evitar que un vendedor agregue joyas de otra marca a su inventario.
     const { rows: vendorRows } = await pool.query(
-      `SELECT marca_id FROM usuarios WHERE id = $1`,
+      `SELECT marca_id, suscripcion_plan FROM usuarios WHERE id = $1`,
       [vendorId]
     );
     if (vendorRows.length === 0) {
       return res.status(401).json({ error: 'Vendedor no encontrado.' });
     }
     const vendorMarcaId = vendorRows[0].marca_id;
+    const plan = vendorRows[0].suscripcion_plan || 'mini';
+
+    if (plan === 'mini') {
+      const invCount = await pool.query(`SELECT COUNT(*) as c FROM inventario_vendedor WHERE vendedor_id = $1`, [vendorId]);
+      if (parseInt(invCount.rows[0].c) >= 50) {
+        return res.status(403).json({ error: 'Tu Plan Mini permite hasta 50 joyas en inventario. Actualiza tu plan para agregar más.' });
+      }
+    }
 
     const { rows: joyas } = await pool.query(
       `SELECT id FROM catalogo_maestro
@@ -391,6 +399,12 @@ export const updateStoreSettings = async (req: AuthRequest, res: Response): Prom
   }
 
   try {
+    const { rows: vendorRows } = await pool.query(`SELECT suscripcion_plan FROM usuarios WHERE id = $1`, [userId]);
+    const plan = vendorRows[0]?.suscripcion_plan || 'mini';
+    if (plan !== 'pro') {
+      return res.status(403).json({ error: 'La Tienda Digital Pública es exclusiva del Plan Pro. Actualiza tu suscripción para habilitarla.' });
+    }
+
     const cleanSlug = store_slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
     const cleanPhone = telefono.replace(/\D/g, '');
 
@@ -458,9 +472,19 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ error: 'Faltan datos para crear tu joya personalizada.' });
   }
 
-  const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    const { rows: vendorRows } = await pool.query(`SELECT suscripcion_plan FROM usuarios WHERE id = $1`, [vendorId]);
+    const plan = vendorRows[0]?.suscripcion_plan || 'mini';
+    if (plan === 'mini') {
+      const invCount = await pool.query(`SELECT COUNT(*) as c FROM inventario_vendedor WHERE vendedor_id = $1`, [vendorId]);
+      if (parseInt(invCount.rows[0].c) >= 50) {
+        return res.status(403).json({ error: 'Tu Plan Mini permite hasta 50 joyas en inventario. Actualiza tu plan para agregar más.' });
+      }
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
     // 1. Se crea la joya en el catálogo maestro como pendiente (estado = false).
     //    La categoría queda en NULL: la asignará el administrador al aprobarla.

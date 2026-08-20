@@ -78,7 +78,7 @@ export const login = async (req: Request, res: Response): Promise<any> => {
     }
 
     const query = `
-      SELECT u.id, u.marca_id, u.email, u.password_hash, u.suscripcion_fin, u.suscripcion_estado,
+      SELECT u.id, u.marca_id, u.email, u.password_hash, u.suscripcion_fin, u.suscripcion_estado, u.suscripcion_plan,
              ur.rol_id AS rol
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
@@ -148,7 +148,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
   const userId = req.user?.user_id;
   try {
     const query = `
-      SELECT u.id, u.nombre, u.email, u.marca_id, u.suscripcion_fin, u.suscripcion_estado, ur.rol_id AS rol,
+      SELECT u.id, u.nombre, u.email, u.marca_id, u.suscripcion_fin, u.suscripcion_estado, u.suscripcion_plan, ur.rol_id AS rol,
              u.store_slug, u.telefono, u.store_name, u.personalizacion
       FROM usuarios u
       LEFT JOIN usuario_roles ur ON u.id = ur.usuario_id
