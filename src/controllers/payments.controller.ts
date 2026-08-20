@@ -418,7 +418,7 @@ async function procesarFacturaPagada(invoice: FacturaStripe): Promise<void> {
   const periodEnd: number | undefined = lineaConPeriodo?.period?.end;
   const finISO = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
 
-  const priceId = lineaConPeriodo?.price?.id;
+  const priceId = (lineaConPeriodo as any)?.price?.id || (lineaConPeriodo as any)?.plan?.id;
   let plan = 'mini';
   if (priceId === 'price_1TaSbSJR4YuhIwI0RLOhH4rO') plan = 'pro';
   else if (priceId === 'price_1U5zdgJR4YuhIwI0WdU4jWFg') plan = 'avanzado';
