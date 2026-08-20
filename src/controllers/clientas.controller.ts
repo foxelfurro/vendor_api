@@ -31,6 +31,16 @@ export const createClienta = async (req: AuthRequest, res: Response): Promise<an
   }
 
   try {
+    const { rows: vendorRows } = await pool.query(`SELECT suscripcion_plan FROM usuarios WHERE id = $1`, [vendorId]);
+    const plan = vendorRows[0]?.suscripcion_plan || 'mini';
+    
+    if (plan === 'mini') {
+      const clientasCount = await pool.query(`SELECT COUNT(*) as c FROM clientas WHERE vendedor_id = $1`, [vendorId]);
+      if (parseInt(clientasCount.rows[0].c) >= 20) {
+        return res.status(403).json({ error: 'Tu Plan Mini permite hasta 20 clientas registradas. Actualiza tu plan para agregar más.' });
+      }
+    }
+
     const query = `
       INSERT INTO clientas (vendedor_id, nombre, telefono, detalles)
       VALUES ($1, $2, $3, $4)

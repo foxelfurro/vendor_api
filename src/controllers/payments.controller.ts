@@ -99,14 +99,10 @@ async function crearSesionPortal(customerId: string): Promise<string> {
 // suscripción nueva (modo 'checkout'). El frontend solo redirige a `url`.
 // =============================================================================
 export const crearCheckout = async (req: Request, res: Response): Promise<any> => {
-  const { email, password } = req.body;
+  const { email, password, price_id } = req.body;
 
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Ingresa tu correo y contraseña.' });
-  }
-  if (!STRIPE_PRICE_ID) {
-    console.error('Falta STRIPE_PRICE_ID en variables de entorno.');
-    return res.status(500).json({ error: 'Error de configuración del servidor.' });
+  if (!email || !password || !price_id) {
+    return res.status(400).json({ error: 'Faltan datos para crear la sesión de pago.' });
   }
 
   try {
@@ -157,14 +153,15 @@ export const crearCheckout = async (req: Request, res: Response): Promise<any> =
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       ...customerParam,
-      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+      line_items: [{ price: price_id, quantity: 1 }],
       allow_promotion_codes: true,
       success_url: `${FRONTEND_URL}/pago/resultado?pago_id=${pagoId}&session_id=${pagoId}`,
       cancel_url: `${FRONTEND_URL}/suscripcion`,
       // Metadatos para poder conciliar en el webhook.
-      metadata: { pago_id: pagoId, usuario_id: user.id },
+      metadata: { pago_id: pagoId, usuario_id: user.id, price_id: price_id },
       subscription_data: {
-        metadata: { pago_id: pagoId, usuario_id: user.id },
+        metadata: { pago_id: pagoId, usuario_id: user.id, price_id: price_id },
+        ...(price_id === 'price_1TaSbSJR4YuhIwI0RLOhH4rO' ? { trial_period_days: 7 } : {}),
       },
     });
 
@@ -366,6 +363,11 @@ async function procesarCheckoutCompletado(session: SesionCheckoutStripe): Promis
   if (rows.length === 0) return;
   const usuarioId: string = rows[0].usuario_id;
 
+  const priceId = session.metadata?.price_id;
+  let plan = 'mini';
+  if (priceId === 'price_1TaSbSJR4YuhIwI0RLOhH4rO') plan = 'pro';
+  else if (priceId === 'price_1U5zdgJR4YuhIwI0WdU4jWFg') plan = 'avanzado';
+
   // Vincular los identificadores de Stripe con el usuario.
   await pool.query(
     `UPDATE usuarios
@@ -375,10 +377,6 @@ async function procesarCheckoutCompletado(session: SesionCheckoutStripe): Promis
     [customerId, subscriptionId, usuarioId]
   );
 
-  // Si el pago ya está cubierto, activar aquí como respaldo. Se obtiene la
-  // vigencia REAL desde la suscripción para que activarCuenta sea idempotente
-  // con invoice.payment_succeeded (de lo contrario, según el orden en que
-  // lleguen los webhooks, se extendería el período dos veces).
   if (session.payment_status === 'paid' || session.payment_status === 'no_payment_required') {
     let finISO: string | null = null;
     if (subscriptionId) {
@@ -390,7 +388,7 @@ async function procesarCheckoutCompletado(session: SesionCheckoutStripe): Promis
         console.warn('No se pudo recuperar la suscripción para calcular la vigencia:', e);
       }
     }
-    await activarCuenta(usuarioId, pagoId, subscriptionId, finISO);
+    await activarCuenta(usuarioId, pagoId, subscriptionId, finISO, plan);
   }
 }
 
@@ -420,6 +418,11 @@ async function procesarFacturaPagada(invoice: FacturaStripe): Promise<void> {
   const periodEnd: number | undefined = lineaConPeriodo?.period?.end;
   const finISO = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
 
+  const priceId = (lineaConPeriodo as any)?.price?.id || (lineaConPeriodo as any)?.plan?.id;
+  let plan = 'mini';
+  if (priceId === 'price_1TaSbSJR4YuhIwI0RLOhH4rO') plan = 'pro';
+  else if (priceId === 'price_1U5zdgJR4YuhIwI0WdU4jWFg') plan = 'avanzado';
+
   // Localizar el pago pendiente más reciente de este usuario para marcarlo pagado.
   const { rows: pagos } = await pool.query(
     `SELECT id FROM pagos
@@ -429,7 +432,7 @@ async function procesarFacturaPagada(invoice: FacturaStripe): Promise<void> {
   );
   const pagoId: string | null = pagos.length > 0 ? pagos[0].id : null;
 
-  await activarCuenta(usuario.id, pagoId, subscriptionId ?? null, finISO);
+  await activarCuenta(usuario.id, pagoId, subscriptionId ?? null, finISO, plan);
 }
 
 /**
@@ -445,7 +448,8 @@ async function activarCuenta(
   usuarioId: string,
   pagoId: string | null,
   subscriptionId: string | null,
-  finISO: string | null
+  finISO: string | null,
+  plan: string = 'mini'
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -463,13 +467,12 @@ async function activarCuenta(
     await client.query(
       `UPDATE usuarios
        SET suscripcion_estado     = 'activa',
+           suscripcion_plan       = $4,
            suscripcion_inicio     = COALESCE(suscripcion_inicio, NOW()),
-           -- Vigencia: la fecha absoluta de Stripe si está disponible; si no,
-           -- se conserva la actual; como último recurso, un mes desde ahora.
            suscripcion_fin        = COALESCE($1::timestamp, suscripcion_fin, NOW() + INTERVAL '1 month'),
            stripe_subscription_id = COALESCE($2, stripe_subscription_id)
        WHERE id = $3`,
-      [finISO, subscriptionId, usuarioId]
+      [finISO, subscriptionId, usuarioId, plan]
     );
 
     await client.query('COMMIT');

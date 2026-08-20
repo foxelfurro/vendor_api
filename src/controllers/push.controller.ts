@@ -15,6 +15,11 @@ export const subscribeToPush = async (req: AuthRequest, res: Response): Promise<
   }
 
   try {
+    const { rows: vendorRows } = await pool.query(`SELECT suscripcion_plan FROM usuarios WHERE id = $1`, [vendorId]);
+    if (vendorRows[0]?.suscripcion_plan !== 'pro') {
+      return res.status(403).json({ error: 'Las notificaciones Push son exclusivas del Plan Pro.' });
+    }
+
     // Evitar duplicados exactos comparando el endpoint
     const checkQuery = `SELECT id FROM push_subscriptions WHERE vendedor_id = $1 AND subscription->>'endpoint' = $2`;
     const checkRes = await pool.query(checkQuery, [vendorId, subscription.endpoint]);
