@@ -481,10 +481,14 @@ export const addCustomToInventory = async (req: AuthRequest, res: Response) => {
         return res.status(403).json({ error: 'Tu Plan Mini permite hasta 50 joyas en inventario. Actualiza tu plan para agregar más.' });
       }
     }
+  } catch (error) {
+    console.error("Error validando plan:", error);
+    return res.status(500).json({ error: 'Hubo un error al validar tu suscripción.' });
+  }
 
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
 
     // 1. Se crea la joya en el catálogo maestro como pendiente (estado = false).
     //    La categoría queda en NULL: la asignará el administrador al aprobarla.
