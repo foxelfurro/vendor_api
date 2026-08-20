@@ -9,5 +9,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "verbatimModuleSyntax": false
-  }
+  },
+  "include": [
+    "src/**/*"
+  ]
 }
