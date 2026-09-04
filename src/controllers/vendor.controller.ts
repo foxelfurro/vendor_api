@@ -155,7 +155,8 @@ export const getInventory = async (req: AuthRequest, res: Response) => {
         cm.nombre AS nombre,
         cm.descripcion AS descripcion,
         COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
-        cm.ruta_imagen AS ruta_imagen,
+        COALESCE(iv.foto_personalizada, cm.ruta_imagen) AS ruta_imagen,
+        iv.foto_personalizada AS foto_personalizada,
         cm.categoria_id,
         c.nombre AS categoria,
         cm.estado,
@@ -236,6 +237,30 @@ export const addToInventory = async (req: AuthRequest, res: Response) => {
     }
     console.error("Error en addToInventory:", error);
     res.status(500).json({ error: 'Hubo un error interno al guardar la joya en tu inventario.' });
+  }
+};
+
+// PUT /vendor/inventory/:id/photo
+export const updateInventoryPhoto = async (req: AuthRequest, res: Response) => {
+  const vendorId = req.user?.user_id;
+  const { id } = req.params;
+  const { foto_personalizada } = req.body;
+
+  try {
+    const query = `
+      UPDATE inventario_vendedor
+      SET foto_personalizada = $1
+      WHERE id = $2 AND vendedor_id = $3
+      RETURNING *;
+    `;
+    const { rows } = await pool.query(query, [foto_personalizada || null, id, vendorId]);
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Registro de inventario no encontrado.' });
+    }
+    res.json({ message: 'Foto actualizada correctamente', inventario: rows[0] });
+  } catch (error) {
+    console.error("Error en updateInventoryPhoto:", error);
+    res.status(500).json({ error: 'Error al actualizar la foto.' });
   }
 };
 
@@ -359,7 +384,7 @@ export const getSellerCatalogBySlug = async (req: Request, res: Response) => {
         cm.nombre AS nombre,
         cm.sku AS sku,
         COALESCE(cm.descripcion, 'Pieza exclusiva de nuestra colección independiente.') AS descripcion,
-        cm.ruta_imagen AS ruta_imagen,
+        COALESCE(iv.foto_personalizada, cm.ruta_imagen) AS ruta_imagen,
         COALESCE(cm.precio_sugerido, 0) AS precio_sugerido,
         cm.categoria_id,
         c.nombre AS categoria
