@@ -203,7 +203,7 @@ export const getClientaDetalle = async (req: AuthRequest, res: Response): Promis
     
     // Sus ventas (con o sin abonos)
     const ventasRes = await pool.query(`
-      SELECT v.id, v.fecha, v.precio_total, v.estado_pago, v.saldo_restante, c.nombre as producto
+      SELECT v.id, v.fecha, v.precio_total, v.estado_pago, v.saldo_restante, c.nombre as producto, c.sku
       FROM ventas v
       JOIN inventario_vendedor iv ON v.inventario_id = iv.id
       JOIN catalogo_maestro c ON iv.producto_maestro_id = c.id
