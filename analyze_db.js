@@ -1,7 +1,12 @@
 const { Client } = require('pg');
 
-// Remove sslmode from the end
-const connectionString = 'postgresql://neondb_owner:npg_L9N4isCgJuVB@ep-frosty-firefly-a4w8fux6-pooler.us-east-1.aws.neon.tech/neondb';
+require('dotenv').config();
+
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error('Falta la variable de entorno DATABASE_URL.');
+  process.exit(1);
+}
 
 const client = new Client({
   connectionString,

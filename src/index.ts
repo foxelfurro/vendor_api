@@ -35,17 +35,23 @@ app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ limit: '1mb', extended: true }));
 
 // ─── CONFIGURACIÓN DE WEB PUSH ───────────────────────────────────────────────
-const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || 'BOeStfB8mHs00pAkKgnThLDf9dMcpMhpV9YqmayP-i8wGBur0MdQ7xdFUYVPoXuq_OepFr0axaZvXzPRXRxpeic';
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || 'FWPZC6O7eo_7R6euygivLncR48FPJOeNPnjvK9HFwCo';
+// Las llaves se leen SOLO del entorno. Si faltan, las notificaciones push se
+// desactivan (el resto del servidor funciona normalmente).
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY;
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 
-webpush.setVapidDetails(
-  'mailto:admin@qlatte.com',
-  VAPID_PUBLIC_KEY,
-  VAPID_PRIVATE_KEY
-);
+if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
+  webpush.setVapidDetails(
+    'mailto:admin@qlatte.com',
+    VAPID_PUBLIC_KEY,
+    VAPID_PRIVATE_KEY
+  );
 
-// ─── CRON JOBS ───────────────────────────────────────────────────────────────
-startPushCron();
+  // ─── CRON JOBS ─────────────────────────────────────────────────────────────
+  startPushCron();
+} else {
+  console.warn('Faltan VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY: notificaciones push desactivadas.');
+}
 
 // ─── RUTAS PÚBLICAS ──────────────────────────────────────────────────────────
 // Genera una URL prefirmada de R2. El frontend sube la imagen directamente

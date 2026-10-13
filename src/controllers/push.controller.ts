@@ -3,7 +3,11 @@ import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
 
 export const getVapidPublicKey = (req: Request, res: Response) => {
-  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || 'BOeStfB8mHs00pAkKgnThLDf9dMcpMhpV9YqmayP-i8wGBur0MdQ7xdFUYVPoXuq_OepFr0axaZvXzPRXRxpeic' });
+  const publicKey = process.env.VAPID_PUBLIC_KEY;
+  if (!publicKey) {
+    return res.status(503).json({ error: 'Las notificaciones push no están configuradas.' });
+  }
+  res.json({ publicKey });
 };
 
 export const subscribeToPush = async (req: AuthRequest, res: Response): Promise<any> => {
