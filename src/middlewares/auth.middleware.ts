@@ -31,8 +31,18 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as TokenPayload;
-    
+    // Rotación de secreto: los tokens nuevos se firman con JWT_SECRET, pero
+    // mientras exista JWT_SECRET_OLD se siguen aceptando los firmados con la
+    // clave anterior (duran 24h). Pasado ese plazo, borra JWT_SECRET_OLD.
+    let decoded: TokenPayload;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET as string) as TokenPayload;
+    } catch (err) {
+      const oldSecret = process.env.JWT_SECRET_OLD;
+      if (!oldSecret) throw err;
+      decoded = jwt.verify(token, oldSecret) as TokenPayload;
+    }
+
     // Asignamos el usuario decodificado a la request
     req.user = decoded;
     next();

@@ -1,6 +1,12 @@
 const { neon } = require('@neondatabase/serverless');
 
-const connectionString = 'postgresql://neondb_owner:npg_L9N4isCgJuVB@ep-frosty-firefly-a4w8fux6-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require';
+require('dotenv').config();
+
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error('Falta la variable de entorno DATABASE_URL.');
+  process.exit(1);
+}
 const sql = neon(connectionString);
 
 async function analyze() {
