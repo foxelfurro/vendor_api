@@ -21,6 +21,9 @@ import { Resend } from 'resend';
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
+// Marca asignada a toda cuenta creada por autorregistro.
+const DEFAULT_MARCA_ID = parseInt(process.env.DEFAULT_MARCA_ID || '', 10) || 1;
+
 // Los pagos ya NO se procesan aquí: se manejan en payments.controller.ts
 // mediante el Checkout alojado de Stripe.
 
@@ -170,7 +173,10 @@ export const getMe = async (req: AuthRequest, res: Response) => {
 // el pago después con su correo y contraseña.
 // =============================================================================
 export const registerAccount = async (req: Request, res: Response): Promise<any> => {
-  const { nombre, email, password, telefono, marca_id, captcha_token } = req.body;
+  // `marca_id` NO se lee del body: la marca define qué catálogo ve la vendedora,
+  // así que quien se registra no puede elegirla. Toda cuenta nueva entra en la
+  // marca por defecto; reasignarla es decisión de un administrador.
+  const { nombre, email, password, telefono, captcha_token } = req.body;
 
   if (!nombre?.trim() || !email?.trim() || !password) {
     return res.status(400).json({ error: 'Faltan datos obligatorios: nombre, correo y contraseña.' });
@@ -206,7 +212,7 @@ export const registerAccount = async (req: Request, res: Response): Promise<any>
       correo,
       hashedPassword,
       telefono?.trim() || null,
-      marca_id ?? 1,
+      DEFAULT_MARCA_ID,
     ]);
     const newUserId = result.rows[0].id;
 
