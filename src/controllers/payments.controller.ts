@@ -32,6 +32,7 @@ import { pool } from '../config/db';
 import { stripe } from '../config/stripe';
 import { mensajeAmigablePago } from '../lib/stripeErrors';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { PlanId, planPorId, planPorPriceId } from '../config/plans';
 
 // --- Configuración -----------------------------------------------------------
 const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
@@ -99,10 +100,17 @@ async function crearSesionPortal(customerId: string): Promise<string> {
 // suscripción nueva (modo 'checkout'). El frontend solo redirige a `url`.
 // =============================================================================
 export const crearCheckout = async (req: Request, res: Response): Promise<any> => {
-  const { email, password, price_id } = req.body;
+  const { email, password, plan: planId, price_id } = req.body;
 
-  if (!email || !password || !price_id) {
+  if (!email || !password || (!planId && !price_id)) {
     return res.status(400).json({ error: 'Faltan datos para crear la sesión de pago.' });
+  }
+
+  // El precio lo decide el servidor. `price_id` solo se acepta por compatibilidad
+  // con el frontend anterior, y únicamente si corresponde a un plan conocido.
+  const plan = planPorId(planId) ?? planPorPriceId(price_id);
+  if (!plan) {
+    return res.status(400).json({ error: 'El plan seleccionado no es válido.' });
   }
 
   try {
@@ -140,7 +148,7 @@ export const crearCheckout = async (req: Request, res: Response): Promise<any> =
       `INSERT INTO pagos (usuario_id, tipo, recurrente, monto, estado)
        VALUES ($1, $2, true, $3, 'pendiente')
        RETURNING id`,
-      [user.id, tipo, 29900] // $299.00 MXN en centavos
+      [user.id, tipo, plan.montoCentavos]
     );
     const pagoId: string = pagoInsert.rows[0].id;
 
@@ -153,15 +161,15 @@ export const crearCheckout = async (req: Request, res: Response): Promise<any> =
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       ...customerParam,
-      line_items: [{ price: price_id, quantity: 1 }],
+      line_items: [{ price: plan.priceId, quantity: 1 }],
       allow_promotion_codes: true,
       success_url: `${FRONTEND_URL}/pago/resultado?pago_id=${pagoId}&session_id=${pagoId}`,
       cancel_url: `${FRONTEND_URL}/suscripcion`,
       // Metadatos para poder conciliar en el webhook.
-      metadata: { pago_id: pagoId, usuario_id: user.id, price_id: price_id },
+      metadata: { pago_id: pagoId, usuario_id: user.id, price_id: plan.priceId, plan: plan.id },
       subscription_data: {
-        metadata: { pago_id: pagoId, usuario_id: user.id, price_id: price_id },
-        ...(price_id === 'price_1TaSbSJR4YuhIwI0RLOhH4rO' ? { trial_period_days: 7 } : {}),
+        metadata: { pago_id: pagoId, usuario_id: user.id, price_id: plan.priceId, plan: plan.id },
+        ...(plan.trialDias > 0 ? { trial_period_days: plan.trialDias } : {}),
       },
     });
 
@@ -327,6 +335,20 @@ function idDe(
 }
 
 /**
+ * Consulta en Stripe el price_id vigente de una suscripción (primer ítem).
+ * Devuelve null si no se puede obtener.
+ */
+async function priceIdDeSuscripcion(subscriptionId: string): Promise<string | null> {
+  try {
+    const sub = await stripe.subscriptions.retrieve(subscriptionId);
+    return sub.items?.data?.[0]?.price?.id ?? null;
+  } catch (e) {
+    console.warn('No se pudo recuperar la suscripción para obtener el precio:', e);
+    return null;
+  }
+}
+
+/**
  * Obtiene el id de la suscripción asociada a una factura.
  * En la API de Stripe 2026-04-22.dahlia el Invoice ya NO tiene el campo
  * `subscription` en la raíz: vive en `parent.subscription_details.subscription`.
@@ -363,10 +385,15 @@ async function procesarCheckoutCompletado(session: SesionCheckoutStripe): Promis
   if (rows.length === 0) return;
   const usuarioId: string = rows[0].usuario_id;
 
-  const priceId = session.metadata?.price_id;
-  let plan = 'mini';
-  if (priceId === 'price_1TaSbSJR4YuhIwI0RLOhH4rO') plan = 'pro';
-  else if (priceId === 'price_1U5zdgJR4YuhIwI0WdU4jWFg') plan = 'avanzado';
+  // El plan se toma de los metadatos que puso crearCheckout. Si no se reconoce,
+  // queda en null y activarCuenta conserva el plan actual (nunca lo degrada).
+  const plan =
+    planPorId(session.metadata?.plan)?.id ??
+    planPorPriceId(session.metadata?.price_id)?.id ??
+    null;
+  if (!plan) {
+    console.warn('checkout.session.completed: plan no reconocido en metadata', session.metadata);
+  }
 
   // Vincular los identificadores de Stripe con el usuario.
   await pool.query(
@@ -418,10 +445,21 @@ async function procesarFacturaPagada(invoice: FacturaStripe): Promise<void> {
   const periodEnd: number | undefined = lineaConPeriodo?.period?.end;
   const finISO = periodEnd ? new Date(periodEnd * 1000).toISOString() : null;
 
-  const priceId = (lineaConPeriodo as any)?.price?.id || (lineaConPeriodo as any)?.plan?.id;
-  let plan = 'mini';
-  if (priceId === 'price_1TaSbSJR4YuhIwI0RLOhH4rO') plan = 'pro';
-  else if (priceId === 'price_1U5zdgJR4YuhIwI0WdU4jWFg') plan = 'avanzado';
+  // En la API 2026-04-22.dahlia la línea de factura ya NO trae `price` ni `plan`:
+  // el precio vive en `pricing.price_details.price`. Antes se leía `line.price`,
+  // que siempre venía vacío, y toda factura dejaba la cuenta en plan 'mini'.
+  const lineaConPrecio = invoice.lines?.data?.find((l) => l.pricing?.price_details?.price);
+  let priceId: string | null = idDe(lineaConPrecio?.pricing?.price_details?.price);
+
+  // Respaldo: consultar el precio directamente en la suscripción.
+  if (!priceId && subscriptionId) {
+    priceId = await priceIdDeSuscripcion(subscriptionId);
+  }
+
+  const plan = planPorPriceId(priceId)?.id ?? null;
+  if (!plan) {
+    console.warn('invoice.payment_succeeded: price_id no reconocido; se conserva el plan actual.', priceId);
+  }
 
   // Localizar el pago pendiente más reciente de este usuario para marcarlo pagado.
   const { rows: pagos } = await pool.query(
@@ -449,7 +487,7 @@ async function activarCuenta(
   pagoId: string | null,
   subscriptionId: string | null,
   finISO: string | null,
-  plan: string = 'mini'
+  plan: PlanId | null
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -467,7 +505,7 @@ async function activarCuenta(
     await client.query(
       `UPDATE usuarios
        SET suscripcion_estado     = 'activa',
-           suscripcion_plan       = $4,
+           suscripcion_plan       = COALESCE($4, suscripcion_plan, 'mini'),
            suscripcion_inicio     = COALESCE(suscripcion_inicio, NOW()),
            suscripcion_fin        = COALESCE($1::timestamp, suscripcion_fin, NOW() + INTERVAL '1 month'),
            stripe_subscription_id = COALESCE($2, stripe_subscription_id)
@@ -520,6 +558,16 @@ async function manejarActualizacionSuscripcion(sub: SuscripcionStripe): Promise<
   const subId: string | undefined = sub?.id;
   const status: string = sub?.status ?? '';
   if (!subId) return;
+
+  // Cambio de plan (p. ej. desde el Billing Portal): si el precio vigente
+  // corresponde a un plan conocido, se sincroniza. Si no, no se toca.
+  const plan = planPorPriceId(sub.items?.data?.[0]?.price?.id)?.id;
+  if (plan) {
+    await pool.query(
+      `UPDATE usuarios SET suscripcion_plan = $1 WHERE stripe_subscription_id = $2`,
+      [plan, subId]
+    );
+  }
 
   // Solo actualizamos el estado si es algo relevante; 'active' se gestiona
   // por invoice.payment_succeeded y no se toca aquí para evitar colisiones.
