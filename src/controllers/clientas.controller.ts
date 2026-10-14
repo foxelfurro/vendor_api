@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { SQL_HOY } from '../lib/timezone';
 
 // --- 1. OBTENER LISTA DE CLIENTAS ---
 export const getClientas = async (req: AuthRequest, res: Response) => {
@@ -118,7 +119,7 @@ export const getCobrosHoyCount = async (req: AuthRequest, res: Response): Promis
     const query = `
       SELECT COUNT(id)::int as count 
       FROM clientas 
-      WHERE vendedor_id = $1 AND saldo_pendiente > 0 AND fecha_proximo_pago <= CURRENT_DATE;
+      WHERE vendedor_id = $1 AND saldo_pendiente > 0 AND fecha_proximo_pago <= ${SQL_HOY};
     `;
     const { rows } = await pool.query(query, [vendorId]);
     res.json({ count: rows[0].count });
