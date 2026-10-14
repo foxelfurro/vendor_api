@@ -7,8 +7,21 @@
  * - `AuthRequest`  → Interfaz extendida de Request que incluye el campo `user`.
  */
 
-import { Request, Response, NextFunction } from 'express';
+import { Request, Response, NextFunction, CookieOptions } from 'express';
 import jwt from 'jsonwebtoken';
+
+/**
+ * Opciones de la cookie de sesión. Se usan tanto al crearla (login) como al
+ * borrarla (logout / token inválido): el navegador solo elimina la cookie si
+ * `domain`, `path`, `secure` y `sameSite` coinciden con los de su creación.
+ */
+export const AUTH_COOKIE_OPTIONS: CookieOptions = {
+  httpOnly: true,
+  secure: true,
+  sameSite: 'none',
+  domain: '.qlatte.com',
+  path: '/',
+};
 
 /** Estructura del payload incluido en el JWT de la aplicación. */
 interface TokenPayload {
@@ -48,7 +61,7 @@ export const verifyToken = (req: AuthRequest, res: Response, next: NextFunction)
     next();
   } catch (error) {
     // Si el token es inválido, limpiamos la cookie por seguridad
-    res.clearCookie('token');
+    res.clearCookie('token', AUTH_COOKIE_OPTIONS);
     return res.status(401).json({ error: 'Token inválido o expirado.' });
   }
 };
