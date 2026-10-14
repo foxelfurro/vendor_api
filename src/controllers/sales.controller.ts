@@ -35,6 +35,18 @@ export const registerSale = async (req: AuthRequest, res: Response): Promise<any
   try {
     await client.query('BEGIN');
 
+    // 0. La clienta (si se indicó) debe pertenecer a este vendedor; si no, se
+    //    podría alterar el saldo de clientas ajenas.
+    if (clienta_id) {
+      const clientaCheck = await client.query(
+        `SELECT id FROM clientas WHERE id = $1 AND vendedor_id = $2`,
+        [clienta_id, vendorId]
+      );
+      if (clientaCheck.rowCount === 0) {
+        throw new Error('La clienta no existe o no pertenece a tu cartera.');
+      }
+    }
+
     // 1. Descontamos del stock
     const updateStockQuery = `
       UPDATE inventario_vendedor
@@ -84,8 +96,8 @@ export const registerSale = async (req: AuthRequest, res: Response): Promise<any
     // 4. Actualizar saldo global de la clienta y fecha de próximo pago
     if (clienta_id) {
       await client.query(
-        `UPDATE clientas SET saldo_pendiente = saldo_pendiente + $1, fecha_proximo_pago = COALESCE($2, fecha_proximo_pago) WHERE id = $3`, 
-        [saldoRestante, fecha_proximo_pago || null, clienta_id]
+        `UPDATE clientas SET saldo_pendiente = saldo_pendiente + $1, fecha_proximo_pago = COALESCE($2, fecha_proximo_pago) WHERE id = $3 AND vendedor_id = $4`,
+        [saldoRestante, fecha_proximo_pago || null, clienta_id, vendorId]
       );
     }
 

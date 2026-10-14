@@ -14,7 +14,7 @@
 import { Request, Response } from 'express';
 import { pool } from '../config/db';
 import jwt from 'jsonwebtoken';
-import { AuthRequest } from '../middlewares/auth.middleware';
+import { AuthRequest, AUTH_COOKIE_OPTIONS } from '../middlewares/auth.middleware';
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
 import { Resend } from 'resend';
@@ -124,11 +124,8 @@ export const login = async (req: Request, res: Response): Promise<any> => {
     );
 
     res.cookie('token', token, {
-      httpOnly: true,
-      secure: true,
-      sameSite: 'none',
+      ...AUTH_COOKIE_OPTIONS,
       maxAge: 24 * 60 * 60 * 1000,
-      domain: '.qlatte.com',
     });
 
     return res.json({
@@ -333,11 +330,7 @@ export const resetPassword = async (req: Request, res: Response): Promise<any> =
 
 // Cierre de sesión: elimina la cookie JWT del cliente
 export const logout = (req: Request, res: Response): void => {
-  res.clearCookie('token', {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'none',
-  });
+  res.clearCookie('token', AUTH_COOKIE_OPTIONS);
 
   res.json({ message: 'Sesión cerrada con éxito' });
 };
