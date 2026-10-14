@@ -12,6 +12,11 @@
 import { Response } from 'express';
 import { pool } from '../config/db';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { SQL_HOY, sqlLocal } from '../lib/timezone';
+
+// Fecha de la venta en hora de México (ver lib/timezone.ts).
+const FECHA_MX = sqlLocal('fecha');
+const V_FECHA_MX = sqlLocal('v.fecha');
 
 export const getDashboardStats = async (req: AuthRequest, res: Response) => {
   const vendorId = req.user?.user_id;
@@ -27,8 +32,8 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         COALESCE(SUM(precio_total), 0)::float8 as valor_total_ventas,
         COALESCE(SUM(cantidad), 0)::int as unidades_vendidas,
         COUNT(id)::int as transacciones_totales,
-        COALESCE(SUM(CASE WHEN DATE(fecha) = CURRENT_DATE THEN cantidad ELSE 0 END), 0)::int as joyas_vendidas_hoy,
-        COALESCE(SUM(CASE WHEN DATE(fecha) = CURRENT_DATE THEN precio_total ELSE 0 END), 0)::float8 as ingresos_hoy
+        COALESCE(SUM(CASE WHEN ${FECHA_MX}::date = ${SQL_HOY} THEN cantidad ELSE 0 END), 0)::int as joyas_vendidas_hoy,
+        COALESCE(SUM(CASE WHEN ${FECHA_MX}::date = ${SQL_HOY} THEN precio_total ELSE 0 END), 0)::float8 as ingresos_hoy
       FROM ventas
       WHERE vendedor_id = $1;
     `;
@@ -69,7 +74,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
         v.id,
         v.cantidad,
         v.precio_total::float8 as total,
-        TO_CHAR(v.fecha, 'DD/MM/YYYY HH24:MI') as fecha,
+        TO_CHAR(${V_FECHA_MX}, 'DD/MM/YYYY HH24:MI') as fecha,
         cm.nombre as producto_nombre,
         cm.ruta_imagen as imagen
       FROM ventas v
@@ -83,33 +88,33 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     // 6. Datos para gráfica de los últimos 7 días
     const recentActivityQuery = `
       SELECT 
-        TO_CHAR(fecha, 'DD Mon') as etiqueta,
+        TO_CHAR(${FECHA_MX}, 'DD Mon') as etiqueta,
         COALESCE(SUM(precio_total), 0)::float8 as total
       FROM ventas
-      WHERE vendedor_id = $1 AND fecha >= CURRENT_DATE - INTERVAL '7 days'
-      GROUP BY TO_CHAR(fecha, 'DD Mon'), DATE_TRUNC('day', fecha)
-      ORDER BY DATE_TRUNC('day', fecha) ASC;
+      WHERE vendedor_id = $1 AND ${FECHA_MX} >= ${SQL_HOY} - INTERVAL '7 days'
+      GROUP BY TO_CHAR(${FECHA_MX}, 'DD Mon'), DATE_TRUNC('day', ${FECHA_MX})
+      ORDER BY DATE_TRUNC('day', ${FECHA_MX}) ASC;
     `;
 
     // 7. Ventas mensuales del año actual
     const monthlyPerformanceQuery = `
       SELECT
-        TO_CHAR(fecha, 'Month') as mes,
+        TO_CHAR(${FECHA_MX}, 'Month') as mes,
         COALESCE(SUM(precio_total), 0)::float8 as total
       FROM ventas
-      WHERE vendedor_id = $1 AND fecha >= DATE_TRUNC('year', CURRENT_DATE)
-      GROUP BY TO_CHAR(fecha, 'Month'), DATE_TRUNC('month', fecha)
-      ORDER BY DATE_TRUNC('month', fecha) ASC;
+      WHERE vendedor_id = $1 AND ${FECHA_MX} >= DATE_TRUNC('year', ${SQL_HOY})
+      GROUP BY TO_CHAR(${FECHA_MX}, 'Month'), DATE_TRUNC('month', ${FECHA_MX})
+      ORDER BY DATE_TRUNC('month', ${FECHA_MX}) ASC;
     `;
 
     // 8. Ventas totales por año
     const yearlyPerformanceQuery = `
       SELECT
-        EXTRACT(YEAR FROM fecha)::int AS anio,
+        EXTRACT(YEAR FROM ${FECHA_MX})::int AS anio,
         COALESCE(SUM(precio_total), 0)::float8 AS total
       FROM ventas
       WHERE vendedor_id = $1
-      GROUP BY EXTRACT(YEAR FROM fecha)
+      GROUP BY EXTRACT(YEAR FROM ${FECHA_MX})
       ORDER BY anio ASC;
     `;
 
@@ -117,7 +122,7 @@ export const getDashboardStats = async (req: AuthRequest, res: Response) => {
     const cobrosHoyQuery = `
       SELECT id, nombre, telefono, saldo_pendiente::float8 as deuda, fecha_proximo_pago 
       FROM clientas 
-      WHERE vendedor_id = $1 AND saldo_pendiente > 0 AND fecha_proximo_pago <= CURRENT_DATE
+      WHERE vendedor_id = $1 AND saldo_pendiente > 0 AND fecha_proximo_pago <= ${SQL_HOY}
       ORDER BY fecha_proximo_pago ASC;
     `;
 

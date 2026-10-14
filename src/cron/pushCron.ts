@@ -1,9 +1,11 @@
 import cron from 'node-cron';
 import { pool } from '../config/db';
 import webpush from 'web-push';
+import { APP_TIMEZONE, SQL_HOY } from '../lib/timezone';
 
 export const startPushCron = () => {
-  // Se ejecuta todos los días a las 9:00 AM (hora del servidor)
+  // Se ejecuta todos los días a las 9:00 AM hora de México (el servidor está en
+  // UTC; sin `timezone` corría a las 3:00 AM de México).
   cron.schedule('0 9 * * *', async () => {
     console.log('⏳ Ejecutando Cron Job de Notificaciones Push...');
     try {
@@ -11,7 +13,7 @@ export const startPushCron = () => {
       const query = `
         SELECT c.vendedor_id, COUNT(c.id) as total_cobros
         FROM clientas c
-        WHERE c.saldo_pendiente > 0 AND c.fecha_proximo_pago <= CURRENT_DATE
+        WHERE c.saldo_pendiente > 0 AND c.fecha_proximo_pago <= ${SQL_HOY}
         GROUP BY c.vendedor_id
       `;
       const { rows: cobrosPendientes } = await pool.query(query);
@@ -49,5 +51,5 @@ export const startPushCron = () => {
     } catch (error) {
       console.error('Error en cron job de push:', error);
     }
-  });
+  }, { timezone: APP_TIMEZONE });
 };
